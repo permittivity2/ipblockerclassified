@@ -20,7 +20,7 @@ package IPblocker;
 # Conf file is by default located at /etc/ipblocker/ipblocker.conf
 # IP blocker sets up iptable chains in the following manner:
 #   iptables -N ipblocker
-#   iptables -A OUTPPUT -j ipblocker
+#   iptables -A OUTPUT -j ipblocker
 #   iptables -A INPUT -j ipblocker
 #   iptables -N ipblocker_globalallow
 #   iptables -N ipblocker_globaldeny
