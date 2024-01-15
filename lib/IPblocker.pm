@@ -282,6 +282,11 @@ sub go() {
     # Create the global chains and add them to the INPUT, OUTPUT, and FORWARD chains
     $self->add_global_chains_to_input_output()
       or $logger->logdie("Unable to add global chains and global rules");
+    
+    # Add the global allow and deny IPs to the global allow and deny chains
+    $self->add_global_allow_deny_ips();
+    sleep 10;
+die "death death death";
 
     # Create a thread for each logger watcher
     # my $logger_thr = threads->create( \&logger_thread, $self );
@@ -1105,62 +1110,39 @@ sub _grep_regexps {
 
     return $matches;
 }
-#### My original sub _grep_regexps() before refactor by chat gpt
-# sub _grep_regexps() {
-#     my ( $self, $logobj ) = @_;
-#     my $TID = threads->tid;
-#     $TID = "TID: " . $TID;
 
-#     # my @matches = ( );
-#     my $matches;
+# Description:  Adds the IPs to block or accept from the configs globalallow and globaldeny
+# Returns:  1
+sub add_global_allow_deny_ips {
+    my ($self) = @_;
+    my $TID = "TID: " . threads->tid;
+    $logger->debug("$TID|Adding global allow/deny IPs to global chains");
 
-#     my @logcontents = @{ $logobj->{logcontents} };
+    my %ip_rules = (
+        allow => $self->{configs}->{allowlist} || {},
+        deny  => $self->{configs}->{denylist}  || {}
+    );
 
-#     my $IPs = {};
+    $logger->debug("$TID|IP rules: " . Dumper(\%ip_rules)) if $logger->is_debug();
 
-#     for my $regex ( sort keys %{ $logobj->{regexpdeny} } ) {
-#         my $value = $logobj->{regexpdeny}{$regex};
+    foreach my $action (keys %ip_rules) {
+        my $chain = "ipblocker_global" . $action;
+        my $rule_action = $action eq 'allow' ? 'ACCEPT' : 'DROP';
+        foreach my $ruleorder (sort keys %{$ip_rules{$action}}) {
+            my $ip = $ip_rules{$action}{$ruleorder};
+            foreach my $direction ('-s', '-d') {
+                # my $chain = $chain_prefix . ($direction eq '-s' ? '' : 'regex') . $action;
+                my $rule = "$chain $direction $ip -j $rule_action";
+                my $args = { rule => $rule, options => "-w -A" };
 
-#         # my $value = ${ $logobj->{regexpdeny} }{$regex};
-#         $logger->info("$TID|Grep'ing for >>$value<< in $logobj->{file} from byte position $logobj->{seek}");
-#         my @current_matches = grep { /$value/ } @logcontents;
-#         $logger->debug( "$TID|Dumper of current matches: " . Dumper( \@current_matches ) ) if ( $logger->is_debug() );
+                $logger->debug("$TID|Adding >>-w -A $rule<< to iptables queue");                
+                $self->iptablesqueue_enqueue($args);
+            }
+        }
+    }
 
-#         my $array_size  = scalar(@current_matches);
-#         my $array_index = 0;
-#         for my $line (@current_matches) {
-#             chomp($line);
-
-#             # $logger->info("Checking array record $array_index of $array_size for IP address");
-#             $array_index++;
-#             $logger->debug("$TID|Checking >>$line<< for IP address");
-#             # if (s/$REGEX_IPV4/$1/) {
-#             #     $logger->debug("Found IPv4 address $1: ");
-#             #     $matches{$1}++;
-#             # }
-#             my @ip_addresses = ();
-#             push @ip_addresses, $line =~ /$REGEX_IPV4/g;
-#             push @ip_addresses, $line =~ /$REGEX_IPV6/g;
-#             map { $matches->{$_}++ && $logger->debug("Found IP address: $_ ") } @ip_addresses;
-#             # if (s/$REGEX_IPV6/$1/) {
-#             #     $logger->debug("$TID|Found IPv6 address $1: ");
-#             #     $matches{$1}++;
-#             # }
-#             # my @ipv6_addresses = $_ =~ /$REGEX_IPV6/g;
-#         } ## end for (@current_matches)
-#     } ## end for my $regex ( sort keys...)
-
-#     $logger->debug( "$TID|Dump of matches: " . Dumper( $matches ) ) if ( $logger->is_debug() );
-#     my $logmsg = "$TID|Matched IP addresses to be reviewed for potential blocking: ";
-#     $logmsg .= join( ",", sort keys %{$matches} );
-
-#     # foreach ( sort keys %matches ) {
-#     #     $logmsg .= "$_,";
-#     # }
-#     # chop $logmsg;
-#     $logger->info($logmsg);
-#     return $matches;
-# } ## end sub _grep_regexps
+    return 1;
+}
 
 # Stops the module
 #  Future enhancements:

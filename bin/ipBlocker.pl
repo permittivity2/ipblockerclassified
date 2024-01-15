@@ -3,7 +3,7 @@
 #vim: noai:ts=4:sw=4
 
 use strict;
-use lib '/home/gardner/lib/';
+use lib '/home/gardner/git/ipblockerclassified/lib/';
 use IPblocker;
 use Log::Log4perl qw(get_logger);
 use Data::Dumper;
