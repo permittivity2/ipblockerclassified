@@ -16,7 +16,7 @@ package IPblocker;
 
 #### Description
 # This module is designed to read log files and block IP addresses based on regular expressions or as otherwise noted
-# in the conf file. a
+# in the conf file.
 # Conf file is by default located at /etc/ipblocker/ipblocker.conf
 # IP blocker sets up iptable chains in the following manner:
 #   iptables -N ipblocker
