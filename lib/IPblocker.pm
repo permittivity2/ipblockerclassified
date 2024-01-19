@@ -106,6 +106,10 @@ my $lock_obj;    # This is the lock object and is set in set_lockFile()
 my $REGEX_IPV4 = q/\b((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))\b/;
 # my $REGEX_IPV6 = q/.*\b($IPv6_re)\b.*/;
 my $REGEX_IPV6 = q/\b($IPv6_re)\b/;
+my $IPTABLESRUNLINE = 0;  #This is just an odd one.  It is used to track the line number of the sub iptables_thread()
+                          #  where run_iptables() is called.  This is used in the signal interupts to print out the
+                          #  line number of where the iptables command was run.  This is used for debugging.
+                          #  This is set in the iptables_thread() sub.
 my $DEFAULTS   = {
     allowdeny           => 'Allow,Deny',
     allowlist           => {},
@@ -116,10 +120,8 @@ my $DEFAULTS   = {
     denylist            => {},
     forceremovelockfile => 0,
     globalallowlist     => {},
-    globalchain         => [
-        qw / ipblocker_globalallow ipblocker_globalallowregex ipblocker_globaldeny
-          ipblocker_globalregexdeny /
-    ],
+    # globalchain         => [ qw / ipblocker_globalallow ipblocker_globaldeny / ],
+    globalchain          => [qw / ipblocker_global /],
     globalchains         => [qw / INPUT OUTPUT FORWARD /],
     globaldenylist       => {},
     globalregexallowlist => {},
@@ -198,7 +200,7 @@ sub recursiveHashPrint {
     $prefix = '' unless defined $prefix;    # Initialize prefix if not provided
 
     if ( ref($ref) eq 'HASH' ) {
-        foreach my $key ( keys %{$ref} ) {
+        foreach my $key ( sort keys %{$ref} ) {
 
             # Concatenate the current key to the prefix for the next level
             my $new_prefix = $prefix ? "$prefix][$key" : "[$key";
@@ -227,7 +229,7 @@ sub iptables_thread() {
     my $TID = threads->tid;
     $TID = "TID: " . $TID;
 
-    $logger->info("Starting iptables thread");
+    $logger->info("Starting iptables queue watching thread");
 
     while (1) {
         my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
@@ -243,6 +245,8 @@ sub iptables_thread() {
             my $data = $IptablesQueue->dequeue();
             $logger->debug( "$TID|Dequeued from IptablesQueue: " . Dumper($data) ) if $logger->is_debug();
             $self->run_iptables($data) || $logger->error( "Not successful running iptables command: " . Dumper($data) );
+            $IPTABLESRUNLINE = __LINE__;
+            $IPTABLESRUNLINE = $IPTABLESRUNLINE - 1;
         } ## end if ( $iptablesQueue_pending...)
         elsif ( $iptablesQueue_pending == 0 ) {
             $logger->info("$TID|IptablesQueue depth: $iptablesQueue_pending.  Sleeping for 1 second.");
@@ -270,7 +274,7 @@ sub go() {
     }
 
     # Set a few items
-    $self->{run_iptables_line} = 245;  # Line number of sub iptables_thread() where run_iptables() is called
+    $self->{run_iptables_line} = 242;  # Line number of sub iptables_thread() where run_iptables() is called
     $self->set_iptables_command() or $logger->error("Unable to set iptables command");
     $self->set_signal_handler();
     $self->set_lockFile() or $logger->logdie("Unable to set lock file");
@@ -279,14 +283,16 @@ sub go() {
     # Create iptables queueing and thread for commands to run against iptables
     my $iptables_thr = threads->create( \&iptables_thread, $self );
 
-    # Create the global chains and add them to the INPUT, OUTPUT, and FORWARD chains
-    $self->add_global_chains_to_input_output()
-      or $logger->logdie("Unable to add global chains and global rules");
+    # Create the ipblocker_global chain
+    $self->create_iptables_chain( $self->{configs}->{globalchain} )
+      or $logger->logdie("Unable to create global chain");
+
+    # # Create the global chains and add them to the INPUT, OUTPUT, and FORWARD chains
+    # $self->add_global_chains_to_input_output()
+    #   or $logger->logdie("Unable to add global chains and global rules");
     
     # Add the global allow and deny IPs to the global allow and deny chains
     $self->add_global_allow_deny_ips();
-    sleep 10;
-die "death death death";
 
     # Create a thread for each logger watcher
     # my $logger_thr = threads->create( \&logger_thread, $self );
@@ -746,14 +752,17 @@ sub clean_ips_to_block_allowdeny() {
 #   iptables $options $rule 2>&1
 # Future enhancement:
 #   1. delete existing rule if it exists
+# Take note this sub is intended (but not required) to be called from sub iptables_thread()
+#  An error will happen if not called from sub iptables_thread(), but it will not stop the program
+#  This is to encourage using the iptablesqueue_enqueue() sub instead of run_iptables() directly
+#  So, top say this more clearly, if you want to run iptables commands, then call iptablesqueue_enqueue()
 sub run_iptables() {
     my ( $self, $args ) = @_;
     my @caller_lst = caller(0);
-    my $goodcaller = $self->{run_iptables_line};
-    if ( $caller_lst[2] != $goodcaller ) {
+    if ( $caller_lst[2] != $IPTABLESRUNLINE and $IPTABLESRUNLINE != 0 ) {
         my $logmsg = "Looks like the calling sub is not sub iptables_thread.  This is not good.  "
         . "Caller:\n" . Dumper(@caller_lst) . "\n"
-        . "The calling sub was at line $caller_lst[2] and not at line $goodcaller ."
+        . "The calling sub was at line $caller_lst[2] and not at line $IPTABLESRUNLINE ."
         . "This will not be stopped but it should be investigated.  "
         . "Consider calling iptablesqueue_enqueue() instead of run_iptables().  "
         . "Maybe you meant to call \$self->iptablesqueue_enqueue(\$args) instead of \$self->run_iptables(\$args)";\
@@ -911,27 +920,18 @@ sub add_global_chains_to_input_output() {
     my $self = shift;
 
     # The order in which the global chains are added to the default chains
-    my @allowdenyorder = qw /   ipblocker_globalallow   ipblocker_globalallowregex
-      ipblocker_globaldeny    ipblocker_globalregexdeny /;
+    my @allowdenyorder = qw / ipblocker_globalallow ipblocker_globaldeny /;
 
     # User chains setup from config if that exists, otherwise set to default values
-    ## No checking of the chains to use as this is at user descretionx
+    ## No checking of the chains to use as this is at user descretion
     my @builtinchains = qw / INPUT OUTPUT FORWARD /;
     if ( ref $self->{configs}->{globalchains} eq 'ARRAY' ) {
         @builtinchains = @{ $self->{configs}->{globalchains} };
     }
 
-    # @builtinchains ||= @{$self->{globalchains}};
-
     # if allow deny is set to Deny,Allow then change the order of the global chains
     $self->{configs}->{allowdeny} ||= 'Allow,Deny';
     @allowdenyorder = reverse @allowdenyorder if $self->{configs}->{allowdeny} eq 'Deny,Allow';
-
-    # # Change the order of the global chains if allowdeny is set to Deny,Allow
-    # if ( $self->{configs}->{allowdeny} eq 'Deny,Allow' ) {
-    #     @allowdenyorder = qw /  ipblocker_globaldeny    ipblocker_globalregexdeny
-    #       ipblocker_globalallow   ipblocker_globalallowregex /;
-    # }
 
     # Create new chains and new rules if they do not exist
     for my $newchain (@allowdenyorder) {
@@ -971,12 +971,12 @@ sub create_iptables_chain() {
     my $TID = threads->tid;
 
     $logger->info("TID: $TID|Trying to create iptables chain >>$name<<");
-    if ( $name =~
-        m/^(ipblocker_globalallow|ipblocker_globaldeny|ipblocker_globalregexdeny|ipblocker_globalregexallow)$/ )
-    {
-        $logger->error("TID: $TID|Chain name >>$name<< is a reserved name and cannot be used");
-        return 0;
-    } ## end if ( $name =~ ...)
+    # if ( $name =~
+    #     m/^(ipblocker_global|ipblocker_globalallow|ipblocker_globaldeny|ipblocker_globalregexdeny|ipblocker_globalregexallow)$/ )
+    # {
+    #     $logger->error("TID: $TID|Chain name >>$name<< is a reserved name and cannot be used");
+    #     return 0;
+    # } ## end if ( $name =~ ...)
     my $rule = "$name";
     my $options = "-w -N";
     my $args = { rule => $rule, options => $options };
@@ -1109,6 +1109,63 @@ sub _grep_regexps {
     $logger->info($log_msg);
 
     return $matches;
+}
+
+sub add_chain() {
+    my ($self, $chain) = @_;
+    my $TID = "TID: " . threads->tid;
+
+    $logger->info("$TID|Trying to add chain $chain");
+    my $rule = "$chain";
+    my $options = "-w -N";
+    my $args = { rule => $rule, options => $options };
+    $self->iptablesqueue_enqueue($args);
+    return 1;
+}
+
+# Description:  Adds the IPs to block or accept from the configs allowlist and denylist
+# Returns:  1
+# Requires: $args to be a hash reference with the following optional keys:
+#  chain:  The chain to add the rules to
+#  allowlist:  An array reference of IPs to allow
+#  denylist:  An array reference of IPs to deny
+#  allowdenyorder:  The order to add the allow and deny rules
+sub add_allowdeny_ips() {
+    my ($self, $args) = @_;
+    my $TID = "TID: " . threads->tid;
+
+    if ( ref $args ne 'HASH' ) {
+        $logger->error("$TID|add_alldeny_ips() requires a hash reference as an argument");
+        return 0;
+    }
+
+    my %ip_rules = (
+        allow => $args->{allowlist} || [],
+        deny  => $args->{denylist}  || []
+    );
+
+    $logger->debug("$TID|IP rules: " . Dumper(\%ip_rules)) if $logger->is_debug();
+
+    foreach my $action (keys %ip_rules) {
+        # my $chain = "ipblocker_global" . $action;
+        my $chain = $args->{chain} . $action;
+        my $rule_action = $action eq 'allow' ? 'ACCEPT' : 'DROP';
+        foreach my $ruleorder (sort keys %{$ip_rules{$action}}) {
+            my $ip = $ip_rules{$action}{$ruleorder};
+            foreach my $direction ('-s', '-d') {
+                # my $chain = $chain_prefix . ($direction eq '-s' ? '' : 'regex') . $action;
+                my $rule = "$chain $direction $ip -j $rule_action";
+                my $args = { rule => $rule, options => "-w -A" };
+
+                $logger->debug("$TID|Adding >>-w -A $rule<< to iptables queue");                
+                $self->iptablesqueue_enqueue($args);
+            }
+        }
+    }
+
+    return 1;
+
+
 }
 
 # Description:  Adds the IPs to block or accept from the configs globalallow and globaldeny
