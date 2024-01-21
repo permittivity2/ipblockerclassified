@@ -86,13 +86,13 @@ sub setupArgParse {
     my $helpqueuechecktime = "When the queue is empty, how long to wait before checking again.  ";
     $helpqueuechecktime .= "When the queue is not empty, this value is ignored ";
     $helpqueuechecktime .= "and the queue is checked as fast as possible.  ";
-    $helpqueuechecktime .= "This value is in seconds.  Default is 3 seconds.  ";
+    $helpqueuechecktime .= "This value is in seconds.  ";
     $helpqueuechecktime .= "It seems unnecessary to have this value configurable, but here it is.";
     $ap->add_arg(
         '--queuechecktime',
         type    => 'Scalar',
         dest    => 'queuechecktime',
-        default => 3,
+        # default => 3,
         help    => $helpqueuechecktime,
     );
 
