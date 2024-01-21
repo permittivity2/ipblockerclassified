@@ -34,7 +34,7 @@ sub main {
         prodmode            => $clargs->prodmode,
         queuechecktime      => $clargs->queuechecktime,
         readentirefile      => $clargs->readentirefile,
-        queuecycles         => $clargs->queuecycles,
+        cycles              => $clargs->cycles,
     };
 
     my $ipb    = IPblocker->new($ipbArgs);
@@ -72,15 +72,6 @@ sub setupArgParse {
 
         # default => 0,
         help => $helpreadentirefile,
-    );
-
-    $ap->add_arg(
-        '--queuecycles',
-        type => 'Scalar',
-        dest => 'queuecycles',
-
-        # default => 1,
-        help => 'How many times to cycle through the queue before exiting.  Default is LONG_MAX (a large integer).',
     );
 
     my $helpqueuechecktime = "When the queue is empty, how long to wait before checking again.  ";
@@ -164,6 +155,13 @@ sub setupArgParse {
         dest    => 'dumpconfigsandexit',
         default => 0,
         help    => 'Dump the configs and exit',
+    );
+
+    $ap->add_arg(
+        '--cycles',
+        type => 'Scalar',
+        dest => 'cycles',
+        help => 'How many times to cycle through the queue before exiting.  Default is LONG_MAX (a large integer).',
     );
 
     $ap->add_arg(
