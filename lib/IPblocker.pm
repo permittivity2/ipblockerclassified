@@ -8,6 +8,7 @@ package IPblocker;
 ###       This is a list of interfaces.  Need to figure out how to use this to get the IP address of the
 ###       interfaces.  Need to add those IPs to the global allow list.
 ### 4.  Fix sub add_ifconfig_ips_to_allowlist() to handle IPv4 and IPv6 addresses
+### 5.  Change from using log4perl to Log::Any
 
 ####  Next items to work on:
 ### Setup authlog to remove IPs for usernames that are allowed to login
@@ -17,37 +18,21 @@ package IPblocker;
 # in the conf file.
 # Conf file is by default located at /etc/ipblocker/ipblocker.conf
 # IP blocker sets up iptable chains in the following manner:
-#   iptables -N ipblocker
-#   iptables -A OUTPUT -j ipblocker
-#   iptables -A INPUT -j ipblocker
-#   iptables -N ipblocker_globalallow
-#   iptables -N ipblocker_globaldeny
-#   iptables -N ipblocker_globalregexdeny
-#   iptables -N ipblocker_globalregexallow
-#   If the allowdeny is set to 'Allow,Deny' then the following is added:
-#       iptables -I ipblocker 1 -j ipblocker_globalallow
-#       iptables -I ipblocker 2 -j ipblocker_globalregexallow
-#       iptables -I ipblocker 3 -j ipblocker_globaldeny
-#       iptables -I ipblocker 4 -j ipblocker_globalregexdeny
-#   If the allowdeny is set to 'Deny,Allow' then the following is added:
-#       iptables -I ipblocker 1 -j ipblocker_globaldeny
-#       iptables -I ipblocker 2 -j ipblocker_globalregexdeny
-#       iptables -I ipblocker 3 -j ipblocker_globalallow
-#       iptables -I ipblocker 4 -j ipblocker_globalregexallow
+#   # Assuming $self->{configs}->{chainprefix} is set to "IPBLOCKER_"
+#   iptables -N IPBLOCKER_global
+#   iptables -A OUTPUT -j IPBLOCKER_global
+#   iptables -A INPUT -j IPBLOCKER_global
+#   iptables -A FORWARD -j IPBLOCKER_global
+#   Global allowed and denied IP are added to the global chain in the order specified in $self->{configs}->{allowdeny}
 #   Each log file to review is setup as a chain.  As an example for /var/log/auth.log which (as an example) has a name
 #    of "authlog" in the conf file):
-#       iptables -N ipblocker_authlog
-#       iptables -A ipblocker -j ipblocker_authlog_allow
-#       iptables -A ipblocker -j ipblocker_authlog_regexallow
-#       iptables -A ipblocker -j ipblocker_authlog_deny
-#       iptables -A ipblocker -j ipblocker_authlog_regexdeny
+#       iptables -N IPBLOCKER_authlog
+#       iptables -A IPBLOCKER_global -j IPBLOCKER_authlog
 #  That is a lot of chains but it is easy to see what is going on and easy to manage.
 #   Of course, IPs to drop or accept are added to the appropriate chain.
 #### Logging!
 #   A separate config file is used for logging!
 #   The config file for logging is by default located at /etc/ipblocker/log4perl.conf
-#   The config file for logging is by default read every 3 seconds to allow for changes to the logging config file in
-#       real time
 
 use POSIX qw(LONG_MAX);
 use strict;
@@ -67,6 +52,7 @@ use Time::HiRes qw(usleep gettimeofday time);
 use Config::File;
 use Carp;
 use Log::Log4perl qw(get_logger :nowarn :levels);
+use Log::Any qw($log);
 use Data::Dumper;
 use Regexp::IPv6     qw($IPv6_re);
 use LockFile::Simple qw(lock trylock unlock);
@@ -103,8 +89,6 @@ my $lock_obj;    # This is the lock object and is set in set_lockFile()
 #   This is critical and needs be consistent across the entire module
 # my $REGEX_IPV4 = q/.*\b((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))\b.*/;
 my $REGEX_IPV4 = q/\b((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))\b/;
-
-# my $REGEX_IPV6 = q/.*\b($IPv6_re)\b.*/;
 my $REGEX_IPV6      = q/\b($IPv6_re)\b/;
 my $IPTABLESRUNLINE = 0;    #This is just an odd one.  It is used to track the line number of the sub iptables_thread()
                             #  where run_iptables() is called.  This is used in the signal interupts to print out the

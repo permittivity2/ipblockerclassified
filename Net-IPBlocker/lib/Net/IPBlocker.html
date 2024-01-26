@@ -1,0 +1,149 @@
+<?xml version="1.0" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title>Net::IPBlocker - Blocks IPs based on regex from specified log files</title>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<link rev="made" href="mailto:root@localhost" />
+</head>
+
+<body>
+
+
+
+<ul id="index">
+  <li><a href="#NAME">NAME</a></li>
+  <li><a href="#VERSION">VERSION</a></li>
+  <li><a href="#SYNOPSIS">SYNOPSIS</a>
+    <ul>
+      <li><a href="#Future-Enhancements">Future Enhancements</a></li>
+      <li><a href="#DESCRIPTION">DESCRIPTION</a></li>
+    </ul>
+  </li>
+  <li><a href="#SUBROUTINES-METHODS">SUBROUTINES/METHODS</a>
+    <ul>
+      <li><a href="#function1">function1</a></li>
+      <li><a href="#function2">function2</a></li>
+    </ul>
+  </li>
+  <li><a href="#AUTHOR">AUTHOR</a></li>
+  <li><a href="#BUGS">BUGS</a></li>
+  <li><a href="#SUPPORT">SUPPORT</a></li>
+  <li><a href="#ACKNOWLEDGEMENTS">ACKNOWLEDGEMENTS</a></li>
+  <li><a href="#LICENSE-AND-COPYRIGHT">LICENSE AND COPYRIGHT</a></li>
+</ul>
+
+<h1 id="NAME">NAME</h1>
+
+<p>Net::IPBlocker - Blocks IPs based on regex from specified log files</p>
+
+<h1 id="VERSION">VERSION</h1>
+
+<p>Version 0.01</p>
+
+<h1 id="SYNOPSIS">SYNOPSIS</h1>
+
+<p>Blocks IPs based on Regular Expressions in specified log files.</p>
+
+<pre><code>use Net::IPBlocker;
+
+my $foo = Net::IPBlocker-&gt;new();
+$foo-&gt;go(); </code></pre>
+
+<p>You can send all configs into the constructor as a hash, I really advise using a config file. The default config file is /etc/ipblocker/ipblocker.conf but you can set it to another file. If a config file is not found, it will use default values for everything and that will probably not work very well.</p>
+
+<pre><code>my $foo = Net::IPBlocker-&gt;new( { configsfile =&gt; &#39;/etc/ipblocker/ipblocker.conf&#39; } );
+$foo-&gt;go();</code></pre>
+
+<h2 id="Future-Enhancements">Future Enhancements</h2>
+
+<ul>
+
+<li><p>Add jail time for IPs</p>
+
+<p>This involves adding a database to store the IPs and the time they were blocked. This also means adding a mechanism to unblock IPs after a certain amount of time. Luckily, I have threaded this so adding that is just a matter of adding another thread. I am open to ideas of what database to use. I am thinking SQLite. Or, possibly just a file with the IPs and the time they are to be unblocked.</p>
+
+</li>
+<li><p>Add syynchronized appender logging:</p>
+
+<pre><code>https://metacpan.org/dist/Log-Log4perl/view/lib/Log/Log4perl/Appender/Synchronized.pm</code></pre>
+
+</li>
+<li><p>Fix the ability for Log4perl to re-read the &quot;log4perl.conf&quot; which seems to not work right now</p>
+
+</li>
+<li><p>my $interfaces = Net::Ifconfig::Wrapper::Ifconfig(&#39;list&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;);</p>
+
+<pre><code>This is a list of interfaces.  Need to figure out how to use this to get the IP address of the
+interfaces.  Need to add those IPs to the global allow list.</code></pre>
+
+</li>
+<li><p>Fix sub add_ifconfig_ips_to_allowlist() to handle IPv4 and IPv6 addresses</p>
+
+</li>
+<li><p>Change from using log4perl to Log::Any</p>
+
+</li>
+</ul>
+
+<h2 id="DESCRIPTION">DESCRIPTION</h2>
+
+<p>This has been a very long running project of mine. I have been using this script for years to block IPs and then realized Fail2Ban exists. I have tried to use Fail2Ban multiple times but it never seems to work right for me. It seems to lock-up. This is module tries to incorporate the ideas of my past experience with the general idea of Fail2Ban.</p>
+
+<h1 id="SUBROUTINES-METHODS">SUBROUTINES/METHODS</h1>
+
+<h2 id="function1">function1</h2>
+
+<h2 id="function2">function2</h2>
+
+<h1 id="AUTHOR">AUTHOR</h1>
+
+<p>Jeff Gardner, <code>&lt;jeffreygiraffe at cpan.org&gt;</code></p>
+
+<h1 id="BUGS">BUGS</h1>
+
+<p>Please report any bugs or feature requests to <code>bug-net-ipblocker at rt.cpan.org</code>, or through the web interface at <a href="https://rt.cpan.org/NoAuth/ReportBug.html?Queue=Net-IPBlocker">https://rt.cpan.org/NoAuth/ReportBug.html?Queue=Net-IPBlocker</a>. I will be notified, and then you&#39;ll automatically be notified of progress on your bug as I make changes.</p>
+
+<h1 id="SUPPORT">SUPPORT</h1>
+
+<p>You can find documentation for this module with the perldoc command.</p>
+
+<pre><code>perldoc Net::IPBlocker</code></pre>
+
+<p>You can also look for information at:</p>
+
+<ul>
+
+<li><p>RT: CPAN&#39;s request tracker (report bugs here)</p>
+
+<p><a href="https://rt.cpan.org/NoAuth/Bugs.html?Dist=Net-IPBlocker">https://rt.cpan.org/NoAuth/Bugs.html?Dist=Net-IPBlocker</a></p>
+
+</li>
+<li><p>CPAN Ratings</p>
+
+<p><a href="https://cpanratings.perl.org/d/Net-IPBlocker">https://cpanratings.perl.org/d/Net-IPBlocker</a></p>
+
+</li>
+<li><p>Search CPAN</p>
+
+<p><a href="https://metacpan.org/release/Net-IPBlocker">https://metacpan.org/release/Net-IPBlocker</a></p>
+
+</li>
+</ul>
+
+<h1 id="ACKNOWLEDGEMENTS">ACKNOWLEDGEMENTS</h1>
+
+<h1 id="LICENSE-AND-COPYRIGHT">LICENSE AND COPYRIGHT</h1>
+
+<p>This software is Copyright (c) 2024 by Jeff Gardner.</p>
+
+<p>This is free software, licensed under:</p>
+
+<pre><code>The Artistic License 2.0 (GPL Compatible)</code></pre>
+
+
+</body>
+
+</html>
+
+
