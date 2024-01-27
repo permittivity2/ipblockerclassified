@@ -22,8 +22,36 @@
   </li>
   <li><a href="#SUBROUTINES-METHODS">SUBROUTINES/METHODS</a>
     <ul>
-      <li><a href="#function1">function1</a></li>
-      <li><a href="#function2">function2</a></li>
+      <li><a href="#new">new</a>
+        <ul>
+          <li><a href="#All-arguments-to-new-and-their-defaults">All arguments to new() and their defaults</a>
+            <ul>
+              <li><a href="#allowdeny">allowdeny</a></li>
+              <li><a href="#allowlist">allowlist</a></li>
+              <li><a href="#configsfile">configsfile</a></li>
+              <li><a href="#cycles">cycles</a></li>
+              <li><a href="#cyclesleep">cyclesleep</a></li>
+              <li><a href="#dumpconfigsandexit">dumpconfigsandexit</a></li>
+              <li><a href="#denylist">denylist</a></li>
+              <li><a href="#forceremovelockfile">forceremovelockfile</a></li>
+              <li><a href="#globalallowlist">globalallowlist</a></li>
+              <li><a href="#chainprefix">chainprefix</a></li>
+              <li><a href="#globalchains">globalchains</a></li>
+              <li><a href="#globaldenylist">globaldenylist</a></li>
+              <li><a href="#iptables">iptables</a></li>
+              <li><a href="#lockfile">lockfile</a></li>
+              <li><a href="#log4perlconf">log4perlconf</a></li>
+              <li><a href="#loglevel">loglevel</a></li>
+              <li><a href="#logwatch_interval">logwatch_interval</a></li>
+              <li><a href="#prodmode">prodmode</a></li>
+              <li><a href="#queuechecktime">queuechecktime</a></li>
+              <li><a href="#queuecycles-queuecycles-LONG_MAX">queuecycles queuecycles =&gt; LONG_MAX,</a></li>
+              <li><a href="#readentirefile">readentirefile</a></li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li><a href="#go">go</a></li>
     </ul>
   </li>
   <li><a href="#AUTHOR">AUTHOR</a></li>
@@ -46,11 +74,10 @@
 <p>Blocks IPs based on Regular Expressions in specified log files.</p>
 
 <pre><code>use Net::IPBlocker;
-
 my $foo = Net::IPBlocker-&gt;new();
 $foo-&gt;go(); </code></pre>
 
-<p>You can send all configs into the constructor as a hash, I really advise using a config file. The default config file is /etc/ipblocker/ipblocker.conf but you can set it to another file. If a config file is not found, it will use default values for everything and that will probably not work very well.</p>
+<p>You can send all configs into the constructor as a hash, I really advise using a config file. The default config file is <i>/etc/ipblocker/ipblocker.conf</i> but you can set it to another file. If a config file is not found, it will use default values for everything and that will probably not work very well.</p>
 
 <pre><code>my $foo = Net::IPBlocker-&gt;new( { configsfile =&gt; &#39;/etc/ipblocker/ipblocker.conf&#39; } );
 $foo-&gt;go();</code></pre>
@@ -61,12 +88,12 @@ $foo-&gt;go();</code></pre>
 
 <li><p>Add jail time for IPs</p>
 
-<p>This involves adding a database to store the IPs and the time they were blocked. This also means adding a mechanism to unblock IPs after a certain amount of time. Luckily, I have threaded this so adding that is just a matter of adding another thread. I am open to ideas of what database to use. I am thinking SQLite. Or, possibly just a file with the IPs and the time they are to be unblocked.</p>
+<p>This involves adding a database to store the IPs and the time they were blocked. This also means adding a mechanism to unblock IPs after a certain amount of time. Luckily, I have threaded this so adding that is just a matter of adding another thread. I am open to ideas of what database to use. I am thinking SQLite. Or, possibly just a file with the IPs (the rule) and the time they are to be unblocked (deleted from iptables).</p>
 
 </li>
-<li><p>Add syynchronized appender logging:</p>
+<li><p>Add synchronized appender logging:</p>
 
-<pre><code>https://metacpan.org/dist/Log-Log4perl/view/lib/Log/Log4perl/Appender/Synchronized.pm</code></pre>
+<p>https://metacpan.org/dist/Log-Log4perl/view/lib/Log/Log4perl/Appender/Synchronized.pm</p>
 
 </li>
 <li><p>Fix the ability for Log4perl to re-read the &quot;log4perl.conf&quot; which seems to not work right now</p>
@@ -74,8 +101,7 @@ $foo-&gt;go();</code></pre>
 </li>
 <li><p>my $interfaces = Net::Ifconfig::Wrapper::Ifconfig(&#39;list&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;);</p>
 
-<pre><code>This is a list of interfaces.  Need to figure out how to use this to get the IP address of the
-interfaces.  Need to add those IPs to the global allow list.</code></pre>
+<p>This is a list of interfaces. Need to figure out how to use this to get the IP address of the interfaces. Need to add those IPs to the global allow list.</p>
 
 </li>
 <li><p>Fix sub add_ifconfig_ips_to_allowlist() to handle IPv4 and IPv6 addresses</p>
@@ -88,13 +114,131 @@ interfaces.  Need to add those IPs to the global allow list.</code></pre>
 
 <h2 id="DESCRIPTION">DESCRIPTION</h2>
 
-<p>This has been a very long running project of mine. I have been using this script for years to block IPs and then realized Fail2Ban exists. I have tried to use Fail2Ban multiple times but it never seems to work right for me. It seems to lock-up. This is module tries to incorporate the ideas of my past experience with the general idea of Fail2Ban.</p>
+<p>This has been a very long running project of mine. I have been using this script for years to block IPs and then realized Fail2Ban exists. I have tried to use Fail2Ban multiple times but it never seems to work right for me. It seems to lock-up. This module tries to incorporate the ideas of my past experience with the general idea of Fail2Ban.</p>
+
+<p>I highly encourage you to use a config file. The default config file is in the same location as this module but you can set it to another file.</p>
+
+<p>When installing this, you should also receive a script called &quot;ipBlocker.pl&quot;. This is a sample script that uses this module.</p>
+
+<p>Finally, for now, this module use log4perl. I didn&#39;t realize there was a heated debate about log4perl vs Log::Any vs whatever else. I am open to changing this to Log::Any but I need to figure out how to do that.</p>
 
 <h1 id="SUBROUTINES-METHODS">SUBROUTINES/METHODS</h1>
 
-<h2 id="function1">function1</h2>
+<h2 id="new">new</h2>
 
-<h2 id="function2">function2</h2>
+<p>Reads configs, logging configs, sets up logging, sets up a class and returns a blessed object The sub go() is where the action starts</p>
+
+<p>Example:</p>
+
+<pre><code>use IPblocker;
+
+my $args = {
+  configsfile         =&gt; &#39;/etc/ipblocker/ipblocker.conf&#39;,
+  dumpconfigsandexit  =&gt; &#39;0&#39;, # True false value
+  forceremovelockfile =&gt; &#39;0&#39;, # True false value
+  iptables            =&gt; &#39;sudo /sbin/iptables&#39;,
+  lockfile            =&gt; &#39;/var/run/ipblocker.run&#39;,
+  log4perlconf        =&gt; &#39;/etc/ipblocker/log4perl.conf&#39;,  #Can also be 0 to use default log4perl
+  loglevel            =&gt; &#39;DEBUG&#39;, # Can be TRACE DEBUG INFO WARN ERROR FATAL
+  prodmode            =&gt; &#39;0&#39;, # True false value --- Determins if the iptables commands are actually run
+  queuechecktime      =&gt; &#39;3&#39;, # How long to wait when the queue is empty before checking again. Any float value.
+  readentirefile      =&gt; &#39;0&#39;, # True false value --- Determines if the entire log file is read or
+                              # new entries since last run are read.
+  cycles              =&gt; &#39;LONG_MAX&#39;, # How many times to run the main loop.  LONG_MAX is the default.
+};
+
+my $ipb    = IPblocker-&gt;new($args);
+my $logger = $ipb-&gt;{logger};</code></pre>
+
+<h3 id="All-arguments-to-new-and-their-defaults">All arguments to new() and their defaults</h3>
+
+<h4 id="allowdeny">allowdeny</h4>
+
+<p>allowdeny =&gt; &#39;Allow,Deny&#39;,</p>
+
+<h4 id="allowlist">allowlist</h4>
+
+<p>allowlist =&gt; {},</p>
+
+<h4 id="configsfile">configsfile</h4>
+
+<p>configsfile =&gt; &#39;/etc/ipblocker/ipblocker.conf&#39;,</p>
+
+<h4 id="cycles">cycles</h4>
+
+<p>cycles =&gt; LONG_MAX,</p>
+
+<h4 id="cyclesleep">cyclesleep</h4>
+
+<p>cyclesleep =&gt; 0.5,</p>
+
+<h4 id="dumpconfigsandexit">dumpconfigsandexit</h4>
+
+<p>dumpconfigsandexit =&gt; 0,</p>
+
+<h4 id="denylist">denylist</h4>
+
+<p>denylist =&gt; {},</p>
+
+<h4 id="forceremovelockfile">forceremovelockfile</h4>
+
+<p>forceremovelockfile =&gt; 0,</p>
+
+<h4 id="globalallowlist">globalallowlist</h4>
+
+<p>globalallowlist =&gt; {},</p>
+
+<h4 id="chainprefix">chainprefix</h4>
+
+<p>chainprefix =&gt; &quot;IPBLOCKER_&quot;,</p>
+
+<h4 id="globalchains">globalchains</h4>
+
+<p>globalchains =&gt; [qw / INPUT OUTPUT FORWARD /],</p>
+
+<h4 id="globaldenylist">globaldenylist</h4>
+
+<p>globaldenylist =&gt; {},</p>
+
+<h4 id="iptables">iptables</h4>
+
+<p>iptables =&gt; &#39;/sbin/iptables&#39;,</p>
+
+<h4 id="lockfile">lockfile</h4>
+
+<p>lockfile =&gt; &#39;/var/run/ipblocker.run.default&#39;,</p>
+
+<h4 id="log4perlconf">log4perlconf</h4>
+
+<p>log4perlconf =&gt; &#39;/etc/ipblocker/log4perl.conf&#39;,</p>
+
+<h4 id="loglevel">loglevel</h4>
+
+<p>loglevel =&gt; &#39;INFO&#39;</p>
+
+<h4 id="logwatch_interval">logwatch_interval</h4>
+
+<p>logwatch_interval =&gt; 3,</p>
+
+<h4 id="prodmode">prodmode</h4>
+
+<p>prodmode =&gt; 0,</p>
+
+<h4 id="queuechecktime">queuechecktime</h4>
+
+<p>queuechecktime =&gt; 1,</p>
+
+<h4 id="queuecycles-queuecycles-LONG_MAX">queuecycles queuecycles =&gt; LONG_MAX,</h4>
+
+<h4 id="readentirefile">readentirefile</h4>
+
+<p>readentirefile =&gt; 0,</p>
+
+<h2 id="go">go</h2>
+
+<p>This is where the action starts. This is called from the script that uses this module after new() is instantiated.</p>
+
+<p>This creates a thread for each log watcher and a thread for the iptables queue watcher. If you have 5 files to watch, then there will be 5 threads watching those files + 1 thread to add commands to iptables.</p>
 
 <h1 id="AUTHOR">AUTHOR</h1>
 
