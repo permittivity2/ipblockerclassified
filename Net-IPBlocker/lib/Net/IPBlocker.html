@@ -34,23 +34,24 @@
               <li><a href="#dumpconfigsandexit">dumpconfigsandexit</a></li>
               <li><a href="#denylist">denylist</a></li>
               <li><a href="#forceremovelockfile">forceremovelockfile</a></li>
-              <li><a href="#globalallowlist">globalallowlist</a></li>
               <li><a href="#chainprefix">chainprefix</a></li>
               <li><a href="#globalchains">globalchains</a></li>
-              <li><a href="#globaldenylist">globaldenylist</a></li>
               <li><a href="#iptables">iptables</a></li>
               <li><a href="#lockfile">lockfile</a></li>
               <li><a href="#log4perlconf">log4perlconf</a></li>
               <li><a href="#loglevel">loglevel</a></li>
-              <li><a href="#logwatch_interval">logwatch_interval</a></li>
               <li><a href="#prodmode">prodmode</a></li>
               <li><a href="#queuechecktime">queuechecktime</a></li>
-              <li><a href="#queuecycles-queuecycles-LONG_MAX">queuecycles queuecycles =&gt; LONG_MAX,</a></li>
+              <li><a href="#queuecycles">queuecycles</a></li>
               <li><a href="#readentirefile">readentirefile</a></li>
             </ul>
           </li>
         </ul>
       </li>
+    </ul>
+  </li>
+  <li><a href="#Sample-config-file">Sample config file</a>
+    <ul>
       <li><a href="#go">go</a></li>
     </ul>
   </li>
@@ -156,83 +157,427 @@ my $logger = $ipb-&gt;{logger};</code></pre>
 
 <p>allowdeny =&gt; &#39;Allow,Deny&#39;,</p>
 
+<p>Set to &#39;Allow,Deny&#39; or &#39;Deny,Allow&#39; to determine the order of the allow and deny lists. Seteting to &#39;Allow,Deny&#39; means the allow list is processed first and then the deny list is processed. Meaning, as an example, if 1.1.1.1 is on the allow list and allowdeny is set to Allow,Deny, then the IP of 1.1.1.1 will never be blocked. If allowdeny is set to Deny,Allow, then it is possible for 1.1.1.1 to be blocked.</p>
+
 <h4 id="allowlist">allowlist</h4>
 
 <p>allowlist =&gt; {},</p>
+
+<p>A list of IPs to allow. This is a hash reference. The key is the order to allow the IP. The value is the IP. Example:</p>
+
+<pre><code>allowlist =&gt; (
+ &#39;01&#39; =&gt; &#39;1.1.1.1&#39;,
+ &#39;4&#39; =&gt; &#39;1.1.1.4&#39;,
+ &#39;10&#39; =&gt; &#39;1.1.1.2&#39;,
+ &#39;100&#39; =&gt; &#39;1.1.1.3&#39;,
+ 
+)</code></pre>
+
+<p>The allow list is sorted in standard Perl sort order. So, be sure to pad 0&#39;s or whatever to the front of the key.</p>
 
 <h4 id="configsfile">configsfile</h4>
 
 <p>configsfile =&gt; &#39;/etc/ipblocker/ipblocker.conf&#39;,</p>
 
+<p>Use a config file! This is the default config file location. You can set it to another file.</p>
+
 <h4 id="cycles">cycles</h4>
 
 <p>cycles =&gt; LONG_MAX,</p>
+
+<p>How many times to run the main loop. LONG_MAX is the default. Why not infinity? Because I don&#39;t want to.</p>
 
 <h4 id="cyclesleep">cyclesleep</h4>
 
 <p>cyclesleep =&gt; 0.5,</p>
 
+<p>How long to sleep between cycles. This is in seconds. Default is 0.5 seconds. You can use a float value.</p>
+
 <h4 id="dumpconfigsandexit">dumpconfigsandexit</h4>
 
 <p>dumpconfigsandexit =&gt; 0,</p>
+
+<p>If set to 1 (true), then the configs are dumped to stdout and the script exits. This is useful for creating a config file.</p>
 
 <h4 id="denylist">denylist</h4>
 
 <p>denylist =&gt; {},</p>
 
+<p>Similar to allow list but for IPs to deny. This is a hash reference. The key is the order to deny the IP.</p>
+
 <h4 id="forceremovelockfile">forceremovelockfile</h4>
 
 <p>forceremovelockfile =&gt; 0,</p>
 
-<h4 id="globalallowlist">globalallowlist</h4>
-
-<p>globalallowlist =&gt; {},</p>
+<p>This will force removal of lock file (if possible) before starting. Seriously, you better know what you are doing.</p>
 
 <h4 id="chainprefix">chainprefix</h4>
 
 <p>chainprefix =&gt; &quot;IPBLOCKER_&quot;,</p>
 
+<p>This is the prefix for the chains created in iptables. This is the prefix you will see in iptables for all the chains created by this module.</p>
+
 <h4 id="globalchains">globalchains</h4>
 
 <p>globalchains =&gt; [qw / INPUT OUTPUT FORWARD /],</p>
 
-<h4 id="globaldenylist">globaldenylist</h4>
+<p>This is a list of the global chains to add the global chain to. The global chain is where all the subordinate file logger chains are added.</p>
 
-<p>globaldenylist =&gt; {},</p>
+<p>I see some value in adding the global chain to some other chain but by default we add it to INPUT, OUTPUT, and FORWARD. Or, possibly, you don&#39;t want to add to the FORWARD chain. Maybe you onkly care about INPUT table. I don&#39;t know. Whatever works best for you.</p>
 
 <h4 id="iptables">iptables</h4>
 
 <p>iptables =&gt; &#39;/sbin/iptables&#39;,</p>
 
+<p>This is the iptables command to use. You can use sudo or whatever you want. I really encourage using sudo but by default it is not used. Using sudo and non-root user is a bit more work. You need to setup sudoers to allow the user to run iptables. However, I think it is worth it for an added measure of security. If you change this to use sudo, then you may also need to change the lockfile location to a location that the user can write to.</p>
+
 <h4 id="lockfile">lockfile</h4>
 
 <p>lockfile =&gt; &#39;/var/run/ipblocker.run.default&#39;,</p>
+
+<p>This is the lock file location to use to try to prevent multiple instances from running.</p>
 
 <h4 id="log4perlconf">log4perlconf</h4>
 
 <p>log4perlconf =&gt; &#39;/etc/ipblocker/log4perl.conf&#39;,</p>
 
+<p>This is the log4perl configuration file to use. You can also set this to 0 to use the default log4perl configuration.</p>
+
 <h4 id="loglevel">loglevel</h4>
 
 <p>loglevel =&gt; &#39;INFO&#39;</p>
 
-<h4 id="logwatch_interval">logwatch_interval</h4>
-
-<p>logwatch_interval =&gt; 3,</p>
+<p>THis can be TRACE DEBUG INFO WARN ERROR FATAL.</p>
 
 <h4 id="prodmode">prodmode</h4>
 
 <p>prodmode =&gt; 0,</p>
 
+<p>This is a true/false value. If set to 1 (true), then the iptables commands are actually run. If set to 0 (false), then the iptables commands are not run. This is useful for testing.</p>
+
+<p>By default, this is set to 0 (false).</p>
+
 <h4 id="queuechecktime">queuechecktime</h4>
 
 <p>queuechecktime =&gt; 1,</p>
 
-<h4 id="queuecycles-queuecycles-LONG_MAX">queuecycles queuecycles =&gt; LONG_MAX,</h4>
+<p>When the queue is empty, how long to wait before checking again. When the queue is not empty, this value is ignored</p>
+
+<h4 id="queuecycles">queuecycles</h4>
+
+<p>queuecycles =&gt; LONG_MAX,</p>
+
+<p>How many times to check the queue. LONG_MAX is the default. Why not infinity? Because I don&#39;t want to.</p>
 
 <h4 id="readentirefile">readentirefile</h4>
 
 <p>readentirefile =&gt; 0,</p>
+
+<p>This is a true/false value. If set to 1 (true), then the entire log file is read. If set to 0 (false), then only new entries since the last run are read. This can aslo be set per log file in the configs file.</p>
+
+<h1 id="Sample-config-file">Sample config file</h1>
+
+<pre><code># Lines that begin with a comment (#) are ignored
+# Think of each line as a a key:value setup as such: key[sub-key][sub-sub-key][sub-sub-sub-key]=value
+# Duplicates are allowed.  The last one wins!
+# This is being used by perl so let&#39;s keep a few thigns in mind:
+#   1. False value is 0.  Period.  That&#39;s it.  0 (zero) is false.  Everything else is true.
+#   2. Regular expressions are PERL regular expressions.  So they are case sensitive and use PERL regular expressions.
+#   3. Unless otherwise noted, sorting is regular perl sorting.  So 1, 10, 11 come before 2, 20, 21, etc.
+
+
+### Global settings 
+# The global settings are used for all log files unless overridden or combined by the individual log file settings.
+
+# The a different iptables command
+#   If this is not set, then the default is `which iptables`
+#   A simpe check is done to verify that the iptables command exists and is executable.
+#   A good method is to use a sudo command to run iptables as a different user.
+#   This also means seting up sudo to allow the user to run iptables as a different user in passwordless mode.
+#   Steps to do this:
+#     1.  Create a user to run the iptables command.  For example, iptablesuser
+#     2.  Create a group to run the iptables command.  For example, iptablesgroup
+#     3.  Add the iptablesuser to the iptablesgroup
+#     4.  Add the following line to the /etc/sudoers file:
+#           iptablesuser ALL=(ALL) NOPASSWD: /sbin/iptables
+#     5.  Set the iptables command to the following:
+#           iptables=sudo -u iptablesuser /sbin/iptables
+# iptables=/usr/sbin/iptables_some_other_location
+iptables=sudo /sbin/iptables
+
+# The location of the log4perl configuration file if different than default location of /etc/ipblocker/log4perl.conf
+# log4perlconf=/some/other/place/log4perl.conf
+
+# The log level to use.  
+# This will override the log level in the log4perl configuration file.
+# I encourage setting this in the the log4perl configuration file but it is here if you need it.
+# I put this in here because the sample calling has the ability to set the log level so might as well have it here too.
+# This may be one of the following:
+#  DEBUG INFO WARN ERROR FATAL TRACE
+#  FYI:  I did not use trace anywhere in the code so it is not really an option that will give you anything extra 
+#        than just using DEBUG.
+# loglevel=DEBUG
+
+# The location of the lock file
+#   If this is not set, then the default is /var/run/iptables.run
+#   The lock file is used to prevent multiple instances of this script from running at the same time.
+# lockfile=/some/other/directory/iptables.run
+
+# If not set, the default value is 1
+# The number of seconds to wait to check to see if there are entries in the queue to process
+#   Prevents the script from going CPU crazy and checking the queue as fast as possible.
+#   You can set this to 0 to check the queue as fast as possible but I would not recommend it.
+# Once a queue entry is found then the queue is checked continuously until the queue is empty.
+# I see very little utility in having this set to 0 or even less than 1 second.
+queuechecktime=1
+
+# Whether or not the entire log file is read each time.  If set to 0 (false), then we only read from the end of the 
+#   last read (or the beginning if it is the first read or if the log file has been allegedly rotated)
+#   Reading from last read is faster, but if the log file is rotated AND the log file grows larger than the 
+#       last read, then we may miss some entries.
+#   If this setting does not exist, then it is assumed to be 0.
+#   For most situations, this should be set to 0.
+#   If you rotate your log files frequently AND get a lot of traffic, then you may want to set this to 1.
+readentirefile            = 0
+
+# This is how many times a log file will be reviewed.
+# This is a global value and can be set for each log file individually.
+#  (Very bad naming of a variable, sorry)
+#   If this is not set, then the default is 9007199254740991
+cycles=25
+
+# This is how many seconds to sleep between checking a log file.
+# This is a global value and can be set for each log file individually.
+#  If this is not set, then the default is 0.5 seconds
+#  This gets a bit complex to decide but here goes:
+#  If you are always reviewing the entire log file, then this value is rather important.
+#     Reviewing the entire log file means that you are not using the &quot;readentirefile&quot; setting.
+cyclesleep=1
+
+# Process nice level on the OS
+nice=15
+
+PRODMODE=1  # Set this to a perl false value (0) to run in test mode.
+            # Default is test mode. (meaning  PRODMODE=0 is the default)
+            # Test mode will NOT run any iptable command but will log what it would have been done.
+
+chainprefix=IPBLOCKER_  # If not set, default is IPBLOCKER_
+                        # This is the prefix for the iptables chain names.
+                        # The chain names are created as follows:
+                        #   ${chainprefix}${logname}
+                        #  All actions are performed from ${chainprefix}global
+                        # The default is IPBLOCKER_ but you can change it if you want.
+                        # When you do an &#39;iptables -nvL&#39; you will see the chain prefix in the chain names.
+
+globalchains=INPUT,OUTPUT,FORWARD   # If not set, default is INPUT,OUTPUT,FORWARD
+                                    # These are the chains that {chainprefix}global will be added to.
+                                    # All other logger chains will be added to {chainprefix}global
+                                    # The logger rules are then added to the logger chains.
+                                    # Instead of adding the rules to the INPUT,OUTPUT,FORWARD chains, you can
+                                    #   add them to a different chain.  For example, you could add them to a chain
+                                    #   called &quot;MailServer&quot; and then that chain would have to be added to the
+                                    #  INPUT,OUTPUT,FORWARD chains (or whatever chains you want).
+                                    #  This might be useful to change if you want to add the rules to a dummy chain but
+                                    #  is not actually used.... maybe for pre-production testing or something.
+                                    #  Or, maybe you only want rules acted on the INPUT chain and not the OUTPUT chain.
+                                    #  Having FORWARD is a bit aggressive but to each their own.
+                                    #  This value must be a comma separated.  No spaces.
+
+# Deny list of IPs:  deny these IPs, almost always.  The allowdeny value takes precedence when order of allowdeny
+# is set.  See below.
+# The denylist is added to the individual log file denylist.
+denylist[01]                                                  = 165.232.121.37
+denylist[02]                                                  = 165.232.121.36
+
+# Allow list of IPs:  allow these IPs, almost always.  The allowdeny value takes precedence when order of allowdeny
+# is set.  See below.
+# The allowlist is added to the individual log file allowlist.
+allowlist[00]                                                 = 75.87.147.162
+allowlist[01]                                                 = 64.250.56.204
+allowlist[02]                                                 = 192.73.248.201
+allowlist[03]                                                 = 199.38.182.248
+allowlist[04]                                                 = 158.69.195.66
+allowlist[05]                                                 = 185.34.216.102
+allowlist[06]                                                 = 192.73.241.233
+allowlist[07]                                                 = 192.73.241.56
+allowlist[08]                                                 = 198.251.81.67
+allowlist[09]                                                 = 198.50.163.67
+allowlist[10]                                                 = 199.195.248.92
+allowlist[11]                                                 = 204.109.63.3
+allowlist[12]                                                 = 208.86.227.242
+allowlist[13]                                                 = 209.177.157.147
+allowlist[14]                                                 = 81.4.124.103
+allowlist[15]                                                 = 91.189.91.38
+allowlist[16]                                                 = 185.34.3.136
+allowlist[17]                                                 = 20.245.57.59
+allowlist[18]                                                 = 3.3.3.3
+
+# Individual log files settings for this value take precedence over the general settings here
+#   Allow,Deny means that the allowlist is processed first and then the denylist is processed.
+#      Items in the allowlist will be allowed even if they are in the denylist.
+#   Deny,Allow means that the denylist is processed first and then the allowlist is processed.
+#      Items in the denylist will be denied even if they are in the allowlist.
+#  I would not change this unless you know what you are doing.  You have the potential to lock yourself out of your
+#  own system.
+allowdeny                               = Allow,Deny
+
+
+### Not yet implemented....
+# Finds the IPs of each interface and adds them to the allow list.
+#  Some logs have the IP of the interface in the log file.
+#  This is a perl true/false value.  If it is set to 0 (false) then the IPs of each interface will be added to 
+#  the allowlist.
+#  If you keep allowdeny set  to Allow,Deny then this will keep you from blocking your own IPs.
+#    Or, at least that is the idea!  This is totally based on Net::Ifconfig::Wrapper so... do some testing
+#    to make sure that it is working as expected.
+#  I encourage leaving this as 0 (false) but it is here if you need it.  
+#  The default value, if not set, is 0 (false)
+# ignoreinterfaceips=0
+
+### End of Global settings
+
+
+
+# Settings for each log file from here down
+
+### The authlog settings:
+# The &quot;logs_to_review&quot; hash is a list of log files to review.  Each log file has a unique name.  The name is used 
+#   to reference the log file in other parts of the configuration file.
+#   In the exampple of &quot;authlog&quot;, the string &quot;authlog&quot; could be any alphanumeric string.  It is just used for reference.
+
+# load:  This is a perl true/false value.  If it is set to 1 (true) then the log file will be reviewed.
+#   This is just an easy way to keep configs in here but the script/module will not review the log file.
+logs_to_review[authlog][load]                                     = 1
+
+# file: The &quot;file&quot; value is the location of the log file to review.
+logs_to_review[authlog][file]                             = /var/log/auth.log
+
+# readentirefile: Whether or not the entire log file is read each time.  If set to 0 (false), then we only read from 
+#   the end of the last read (or the beginning if it is the first read or if the log file has been allegedly 
+#   rotated)
+#   Reading from last read is faster, but if the log file is rotated AND the log file grows larger than the last 
+#   read, then we may miss some entries.
+#   If this setting does not exist, then it is assumed to be 0.
+#   For most situations, this should be set to 0.
+#   If you rotate your log files frequently AND get a lot of traffic, then you may want to set this to 1.
+#   For now, the script/module is pretty dumb about this.  When set to 0, the entire file is reread if the file size
+#   is less than the last read.
+#   This should be enhanced to check the inode, file size, last change time, etc.  But for now, it is pretty dumb.
+logs_to_review[authlog][readentirefile]           = 0
+
+# cycles: Cycles and cyclessleep
+#   The number of times the log file will be reviewed.
+# logs_to_review[authlog][cycles]                 = 10
+# cyclesleep:  The number of seconds to sleep between cycles.  Can be partial seconds.  So 0.5 is a half second.
+logs_to_review[authlog][cyclesleep]             = 1.5
+
+# protocols:  This is the protocol(s) that will be blocked in the firewall.
+#   If the protocol is not set, then the default is no protocol.
+#   You do not have to set protocol unless you set ports.
+#   If you set ports but not protocol then the script will add the IP to the firewall but will not add the protocol and
+#     thus no ports.  So, the entire IP will be blocked.
+#   There is no checking if the protocol is valid.  So if you set protocol=blah then the script will give an error 
+#     when the rule is tries to be added to the firewall.
+#   Must be separated by non-alphanumeric-digit characters.  So tcp,udp is good.  tcp udp is good.  tcp-udp is good.
+#    The &quot;_&quot; character is not allowed.  So tcp_udp is not good.
+#    Most folks will use commas but whatever floats your boat.
+logs_to_review[authlog][protocols]              = tcp,udp
+
+# ports: This is the port(s) that will be matched for blocking of IPs in the log file.
+#   If the ports are not set, then the default is no ports.
+#   You do not have to set ports but if you do, then you must set protocol.
+#   Example:  ports=22,21,23 means that the script will block IPs that are trying to connect to ports 22, 21, and 23.
+#   Must be separated by commas and ranges are accepted.  Maximum of 15 comma separated values.
+# Example 1:  logs_to_review[authlog][ports]                  = 22,21,23
+# Example 2:  logs_to_review[authlog][ports]                  = 22,21,23,1000:2000,3000:4000
+# Example 3:  logs_to_review[authlog][ports]                  = 22,21,23,1000:2000
+# Bad ports will log as an error and the rule will not be added.
+# If you set ports but no protocol then the entire IP will be blocked on the protocol.
+# logs_to_review[authlog][ports]                  = 22,21,23
+
+# directions:  This is the direction(s) that will be blocked in the firewall.
+#   If the direction is not set, then the default is source
+#  Must be separated by non-digit-alphanumeric characters.  So source,destination is good.  source destination is good.
+#   source-destination is good.
+#   The &quot;_&quot; character is not allowed.  So source_destination is not good.
+#  Most folks will use commas but whatever floats your boat.
+#  Accepted values are source, destination, random
+# Example 1:  logs_to_review[authlog][direction]              = source,destination
+# Example 2:  logs_to_review[authlog][direction]              = source
+# Example 3:  logs_to_review[authlog][direction]              = destination
+# Example 4:  logs_to_review[authlog][direction]              = source,destination,cool,blah,blah,blah
+# In example 4, only source and destination will be used.  The values of cool,blah,blah,blah will be ignored.
+# I think most folks will not set this or just use &#39;source&#39; but I can see value in blocking the destination as well.
+# If you want to really screw with hackers, then set this to &#39;destination&#39; and then they will not get any response
+# The &quot;random&quot; value will ignore (for now) any other value set.  If randiom is used then source or 
+# destination will be randomly chosen for each IP rule.
+# logs_to_review[authlog][directions]          = source,destination
+# logs_to_review[authlog][directions]          = destination
+# logs_to_review[authlog][directions]          = random
+
+# allowdeny
+#  This is the order preference for whitelisted and blacklisted IPs.
+#  If the order is set to &quot;Deny,Allow&quot; then blacklisted IPs will ALWAYS be 
+#    blocked (even if they are in the whitelisted hash)!
+#  If the order is set to &quot;Allow,Deny&quot; then whitelisted IPs will ALWAYS be 
+#    allowed (even if they are in the blacklisted hash)!
+#  If the order is not set or is set incorrectly then the default is &quot;Allow,Deny&quot;
+#  When using authlog, I would reccomend setting the order to &quot;Allow,Deny&quot; so that whitelisted IPs are always allowed 
+#    for ssh.
+#  The order is case insensitive.
+logs_to_review[authlog][allowdeny]          = Allow,Deny
+
+# allowlist: List of IPs to allow just for this log file
+logs_to_review[authlog][allowlist][01]     =  1.1.1.1
+logs_to_review[authlog][allowlist][02]     =  2.2.2.2
+logs_to_review[authlog][allowlist][03]     =  3.3.3.3
+logs_to_review[authlog][allowlist][04]     =  4.4.4.4
+logs_to_review[authlog][allowlist][05]     =  23.116.91.65
+logs_to_review[authlog][allowlist][05]     =  23.116.91.66
+logs_to_review[authlog][allowlist][06]     =  23.116.91.67
+logs_to_review[authlog][allowlist][07]     =  23.116.91.68
+
+# denylist: List of IPs to block just for this log file
+logs_to_review[authlog][denylist][01]      =  5.5.5.5
+logs_to_review[authlog][denylist][02]      =  6.6.6.6
+
+# regexpdeny: Each regular expression must have a unique value.  
+#   This is just typically indexed as 01, 02, 03, 04, etc.  But it can be any Alphanumeric
+#   The index is sorted in simple Perl sort.  So 1, 10, 11 come before 2, 20, 21, etc.
+#   Also, lowercase will come before uppercase.  So a, b, c, A, B, C.
+#   The sorting may matter because the regular expressions are applied in order.
+#   Regular expressions are case insensitive therefore &quot;Failed&quot; is the same as &quot;fAiLed&quot;
+#   Regular expressions Perl regular expressions so you can do fancy *.?[]{}() stuff.
+logs_to_review[authlog][regexpdeny][01]               = Failed password for root from
+logs_to_review[authlog][regexpdeny][02]               = Failed password for invalid user
+logs_to_review[authlog][regexpdeny][03]               = Did not receive identification string from
+logs_to_review[authlog][regexpdeny][04]               = not allowed because listed in DenyUsers
+
+# Special use cases for particular loggers is not yet implemented.
+# # Authlog has a special value of allowed usernames
+# logs_to_review[authlog][allowedusername][01]    = gardner
+# logs_to_review[authlog][allowedusername][02]    = jiggerboy
+# # Authlog has a special value of not-allowed usernames
+# logs_to_review[authlog][deniedusername][01]         = root
+
+
+
+#### Now... an example without comments
+
+### The maillog settings:
+logs_to_review[maillog][load]                                 = 1
+logs_to_review[maillog][file]                         = /var/log/mail.log
+logs_to_review[maillog][cycles]             = 3
+logs_to_review[maillog][cyclesleep]         = 2.25
+logs_to_review[maillog][order]              = Allow,Deny 
+logs_to_review[maillog][regexpdeny][1]                        = Relay access denied,Illegal address syntax from
+logs_to_review[maillog][regexpdeny][2]                        = SASL LOGIN authentication failed
+logs_to_review[maillog][regexpdeny][3]                        = SSL_accept error from
+logs_to_review[maillog][regexpdeny][4]                        = lost connection after AUTH from unknown
+logs_to_review[maillog][regexpdeny][5]                        = 503 5.5.1 Error: authentication # not enabled
+logs_to_review[maillog][regexpdeny][6]                        = disconnect from.* commands=0\/0
+logs_to_review[maillog][regexpdeny][7]                        = non-SMTP command from unknown
+logs_to_review[maillog][regexpdeny][8]                        = connect to.*:25: Connection refused</code></pre>
 
 <h2 id="go">go</h2>
 
