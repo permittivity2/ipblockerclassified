@@ -3,11 +3,16 @@
 #vim: noai:ts=4:sw=4
 
 use strict;
-use lib '/home/gardner/git/ipblockerclassified/lib/';
-use IPblocker;
+use warnings;
+use lib '/home/gardner/git/ipblockerclassified/Net-IPBlocker/lib/';
+use Net::IPBlocker;
+use Log::Any::Adapter;
+Log::Any::Adapter->set('Log4perl');
 use Log::Log4perl qw(get_logger);
 use Data::Dumper;
 use Getopt::ArgParse;
+use Carp;
+use List::Util qw(any);
 
 $Data::Dumper::Sortkeys = 1;
 $Data::Dumper::Indent   = 1;
@@ -21,6 +26,14 @@ sub main {
     # Setup command line options
     my $clargs = setupArgParse();
 
+    # Setup logging
+    my $logargs = {
+        log4perlconf            => $clargs->log4perlconf,
+        logwatch_interval       => $clargs->logwatch_interval,
+        loglevel                => $clargs->loglevel,
+    };
+    my $logger = setup_logger( $logargs );
+
     # Setup IPblocker object
     my $ipbArgs = {
         configsfile         => $clargs->configsfile,
@@ -29,22 +42,51 @@ sub main {
         # ignoreinterfaceips  => $clargs->ignoreinterfaceips,  # Not yet implemented
         iptables            => $clargs->iptables,
         lockfile            => $clargs->lockfile,
-        log4perlconf        => $clargs->log4perlconf,
+        # log4perlconf        => $clargs->log4perlconf,
         loglevel            => $clargs->loglevel,
         prodmode            => $clargs->prodmode,
         queuechecktime      => $clargs->queuechecktime,
+        queuecycles         => $clargs->queuecycles,
         readentirefile      => $clargs->readentirefile,
-        cycles              => $clargs->cycles,
+        totalruntime        => $clargs->totalruntime,
     };
 
-    my $ipb    = IPblocker->new($ipbArgs);
-    my $logger = $ipb->{logger} || get_logger();
+    my $ipb    = Net::IPBlocker->new($ipbArgs);
+    # my $logger = $ipb->{logger} || get_logger();
 
     $logger->info("About to go!");
 
     # Start IPblocker object
     $ipb->go();
 } ## end sub main
+
+sub setup_logger() {
+
+    my ( $args ) = @_;
+
+    $args->{log4perlconf}    ||= '/etc/ipblocker/log4perl.conf';
+    $args->{logwatch_interval} ||= 5;
+    $args->{loglevel}        ||= 'INFO';
+    my $log4perlconf         = $args->{log4perlconf};
+    my $logwatch_interval    = $args->{logwatch_interval};
+    my $loglevel             = $args->{loglevel};
+
+    # Setup logging.  If there is an error, then log to STDOUT at DEBUG level with easy_init()
+    eval { Log::Log4perl->init_and_watch( $log4perlconf, $logwatch_interval ); };
+    if ($@) {
+        carp "Unable to initialize logging from config file >>$log4perlconf<<: $@";
+        carp "Logging to STDOUT at DEBUG level\n";
+        Log::Log4perl->easy_init($Log::Log4perl::DEBUG);
+    }
+    $logger = get_logger() || croak "Unable to get logger";
+    if ( any { $_ eq $loglevel } qw/ DEBUG INFO WARN ERROR FATAL TRACE / ) {
+        $logger->level( $loglevel );
+        $logger->info( "Log level set to $loglevel aka ( $logger->level() )" );
+    }
+    $logger->info("Logging initialized");
+
+    return $logger;
+} ## end sub setup_Logger
 
 # Setup command line options
 # This is often a lengthy subroutine so making it last is a probably good idea for readability
@@ -62,6 +104,13 @@ sub setupArgParse {
         epilog      => 'Copyright 2023.  Copyright notice at: https://www.gnu.org/licenses/gpl-3.0.txt',
     );
 
+    $ap->add_arg(
+        '--totalruntime',
+        type    => 'Scalar',
+        dest    => 'totalruntime',
+        help    => 'How long to run in seconds.  Default is LONG_MAX (a large integer).',
+    );
+
     my $helpreadentirefile = "Read the entire file before processing.  Default is to not read the entire. ";
     $helpreadentirefile .= "This is a global setting and can be overridden per log file via a config file. ";
     $helpreadentirefile .= "No default is set here but will default to not reading the entire file. ";
@@ -72,6 +121,13 @@ sub setupArgParse {
 
         # default => 0,
         help => $helpreadentirefile,
+    );
+
+    $ap->add_arg(
+        '--queuecycles',
+        type    => 'Scalar',
+        dest    => 'queuecycles',
+        help    => 'How many times to cycle through the queue before exiting.  Default is LONG_MAX (a large integer).',
     );
 
     my $helpqueuechecktime = "When the queue is empty, how long to wait before checking again.  ";
@@ -93,6 +149,14 @@ sub setupArgParse {
         dest    => 'prodmode',
         default => 0,
         help    => 'The production mode to use.  0 = test mode, 1 = production mode',
+    );
+
+    $ap->add_arg(
+        '--logwatch_interval',
+        type    => 'Scalar',
+        dest    => 'logwatch_interval',
+        default => 5,
+        help    => 'The log4perl watch interval to use',
     );
 
     $ap->add_arg(

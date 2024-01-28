@@ -48,13 +48,11 @@
           </li>
         </ul>
       </li>
-    </ul>
-  </li>
-  <li><a href="#Sample-config-file">Sample config file</a>
-    <ul>
       <li><a href="#go">go</a></li>
     </ul>
   </li>
+  <li><a href="#Sample-config-file">Sample config file</a></li>
+  <li><a href="#Example-Script">Example Script</a></li>
   <li><a href="#AUTHOR">AUTHOR</a></li>
   <li><a href="#BUGS">BUGS</a></li>
   <li><a href="#SUPPORT">SUPPORT</a></li>
@@ -87,6 +85,11 @@ $foo-&gt;go();</code></pre>
 
 <ul>
 
+<li><p>Add reload ability of configs</p>
+
+<p>This will make it so a full stop and restart does not need to happen to reload configs.</p>
+
+</li>
 <li><p>Add jail time for IPs</p>
 
 <p>This involves adding a database to store the IPs and the time they were blocked. This also means adding a mechanism to unblock IPs after a certain amount of time. Luckily, I have threaded this so adding that is just a matter of adding another thread. I am open to ideas of what database to use. I am thinking SQLite. Or, possibly just a file with the IPs (the rule) and the time they are to be unblocked (deleted from iptables).</p>
@@ -100,6 +103,11 @@ $foo-&gt;go();</code></pre>
 <li><p>Fix the ability for Log4perl to re-read the &quot;log4perl.conf&quot; which seems to not work right now</p>
 
 </li>
+<li><p>Change from using log4perl to Log::Any</p>
+
+<p>I didn&#39;t know about Log::Any when I started this. I am open to changing this to Log::Any but I need to figure out how to do that.</p>
+
+</li>
 <li><p>my $interfaces = Net::Ifconfig::Wrapper::Ifconfig(&#39;list&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;);</p>
 
 <p>This is a list of interfaces. Need to figure out how to use this to get the IP address of the interfaces. Need to add those IPs to the global allow list.</p>
@@ -107,8 +115,7 @@ $foo-&gt;go();</code></pre>
 </li>
 <li><p>Fix sub add_ifconfig_ips_to_allowlist() to handle IPv4 and IPv6 addresses</p>
 
-</li>
-<li><p>Change from using log4perl to Log::Any</p>
+<p>This really findes the IPs on a network interface and adds them to the global allow list. Usually,we don&#39;t want to accidentally block our own IPs. Of course, this will mean adding an option to the configs file to turn this on or off.</p>
 
 </li>
 </ul>
@@ -274,6 +281,12 @@ my $logger = $ipb-&gt;{logger};</code></pre>
 <p>readentirefile =&gt; 0,</p>
 
 <p>This is a true/false value. If set to 1 (true), then the entire log file is read. If set to 0 (false), then only new entries since the last run are read. This can aslo be set per log file in the configs file.</p>
+
+<h2 id="go">go</h2>
+
+<p>This is where the action starts. This is called from the script that uses this module after new() is instantiated.</p>
+
+<p>This creates a thread for each log watcher and a thread for the iptables queue watcher. If you have 5 files to watch, then there will be 5 threads watching those files + 1 thread to add commands to iptables.</p>
 
 <h1 id="Sample-config-file">Sample config file</h1>
 
@@ -579,11 +592,182 @@ logs_to_review[maillog][regexpdeny][6]                        = disconnect from.
 logs_to_review[maillog][regexpdeny][7]                        = non-SMTP command from unknown
 logs_to_review[maillog][regexpdeny][8]                        = connect to.*:25: Connection refused</code></pre>
 
-<h2 id="go">go</h2>
+<h1 id="Example-Script">Example Script</h1>
 
-<p>This is where the action starts. This is called from the script that uses this module after new() is instantiated.</p>
+<pre><code>#!/usr/bin/perl -w
 
-<p>This creates a thread for each log watcher and a thread for the iptables queue watcher. If you have 5 files to watch, then there will be 5 threads watching those files + 1 thread to add commands to iptables.</p>
+use strict;
+use Net::IPBlocker;
+use Log::Log4perl qw(get_logger);
+use Data::Dumper;
+use Getopt::ArgParse;
+
+$Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent   = 1;
+
+my $logger = get_logger();    # This will change to the IPblocker object&#39;s logger when it is instantiated
+
+main();
+
+sub main {
+
+    # Setup command line options
+    my $clargs = setupArgParse();
+
+    # Setup IPblocker object
+    my $ipbArgs = {
+        configsfile         =&gt; $clargs-&gt;configsfile,
+        dumpconfigsandexit  =&gt; $clargs-&gt;dumpconfigsandexit,
+        forceremovelockfile =&gt; $clargs-&gt;forceremovelockfile,
+        # ignoreinterfaceips  =&gt; $clargs-&gt;ignoreinterfaceips,  # Not yet implemented
+        iptables            =&gt; $clargs-&gt;iptables,
+        lockfile            =&gt; $clargs-&gt;lockfile,
+        log4perlconf        =&gt; $clargs-&gt;log4perlconf,
+        loglevel            =&gt; $clargs-&gt;loglevel,
+        prodmode            =&gt; $clargs-&gt;prodmode,
+        queuechecktime      =&gt; $clargs-&gt;queuechecktime,
+        readentirefile      =&gt; $clargs-&gt;readentirefile,
+        cycles              =&gt; $clargs-&gt;cycles,
+    };
+
+    my $ipb    = IPblocker-&gt;new($ipbArgs);
+    my $logger = $ipb-&gt;{logger} || get_logger();
+
+    $logger-&gt;info(&quot;About to go!&quot;);
+
+    # Start IPblocker object
+    $ipb-&gt;go();
+} ## end sub main
+
+# Setup command line options
+# This is often a lengthy subroutine so making it last is a probably good idea for readability
+# The &quot;add_arg&quot; adds to a list so the order of the options for display is reverse order listed here.
+# Meaning, if you want the help to display in a certain order, list them in reverse order here.
+sub setupArgParse {
+    my $args = shift;
+
+    my $description = &quot;Blocks IPs based on regex used to get entry in a log file.  Command line options take &quot;;
+    $description .= &quot;precedence over config file options.&quot;;
+    $description .= &quot;\n\nThis is Perl so 0 (zero) is false and anything else is true.  &quot;;
+    my $ap = Getopt::ArgParse-&gt;new_parser(
+        prog        =&gt; &#39;IP Blocker&#39;,
+        description =&gt; $description,
+        epilog      =&gt; &#39;Copyright 2023.  Copyright notice at: https://www.gnu.org/licenses/gpl-3.0.txt&#39;,
+    );
+
+    my $helpreadentirefile = &quot;Read the entire file before processing.  Default is to not read the entire. &quot;;
+    $helpreadentirefile .= &quot;This is a global setting and can be overridden per log file via a config file. &quot;;
+    $helpreadentirefile .= &quot;No default is set here but will default to not reading the entire file. &quot;;
+    $ap-&gt;add_arg(
+        &#39;--readentirefile&#39;,
+        type =&gt; &#39;Bool&#39;,
+        dest =&gt; &#39;readentirefile&#39;,
+
+        # default =&gt; 0,
+        help =&gt; $helpreadentirefile,
+    );
+
+    my $helpqueuechecktime = &quot;When the queue is empty, how long to wait before checking again.  &quot;;
+    $helpqueuechecktime .= &quot;When the queue is not empty, this value is ignored &quot;;
+    $helpqueuechecktime .= &quot;and the queue is checked as fast as possible.  &quot;;
+    $helpqueuechecktime .= &quot;This value is in seconds.  &quot;;
+    $helpqueuechecktime .= &quot;It seems unnecessary to have this value configurable, but here it is.&quot;;
+    $ap-&gt;add_arg(
+        &#39;--queuechecktime&#39;,
+        type    =&gt; &#39;Scalar&#39;,
+        dest    =&gt; &#39;queuechecktime&#39;,
+        # default =&gt; 3,
+        help    =&gt; $helpqueuechecktime,
+    );
+
+    $ap-&gt;add_arg(
+        &#39;--prodmode&#39;,
+        type    =&gt; &#39;Scalar&#39;,
+        dest    =&gt; &#39;prodmode&#39;,
+        default =&gt; 0,
+        help    =&gt; &#39;The production mode to use.  0 = test mode, 1 = production mode&#39;,
+    );
+
+    $ap-&gt;add_arg(
+        &#39;--loglevel&#39;,
+        choices =&gt; [qw(TRACE DEBUG INFO WARN ERROR FATAL)],
+        dest    =&gt; &#39;loglevel&#39;,
+        help    =&gt; &#39;The log level to use&#39;,
+    );
+
+    $ap-&gt;add_arg(
+        &#39;--log4perlconf&#39;,
+        type    =&gt; &#39;Scalar&#39;,
+        dest    =&gt; &#39;log4perlconf&#39;,
+        default =&gt; &#39;/etc/ipblocker/log4perl.conf&#39;,
+        help    =&gt; &#39;The log4perl configuration file to use&#39;,
+    );
+
+    $ap-&gt;add_arg(
+        &#39;--lockfile&#39;,
+        type =&gt; &#39;Scalar&#39;,
+        dest =&gt; &#39;lockfile&#39;,
+
+        # default =&gt; &#39;/var/run/ipblocker.run.from.perlscript&#39;,
+        # default =&gt; 0,
+        help =&gt; &#39;The lock file location to use to prevent multiple instances from running&#39;,
+    );
+
+    $ap-&gt;add_arg(
+        &#39;--iptables&#39;,
+        type =&gt; &#39;Scalar&#39;,
+        dest =&gt; &#39;iptables&#39;,
+
+        # default =&gt; &#39;/sbin/iptables&#39;,
+        help =&gt; &#39;The iptables command to use&#39;,
+    );
+    
+    # $ap-&gt;add_arg(
+    #     &#39;--ignoreinterfaceips&#39;,
+    #     choices =&gt; [qw(0 1)],
+    #     help    =&gt; &#39;Add IPs on the interfaces to allowlist.  Default is to add them (1).  Set to 0 to not add them.&#39;,
+    # );
+
+    my $help = &quot;Danger danger danger!  &quot;;
+    $help .= &quot;This will force removal of lock file (if possible) before starting.  &quot;;
+    $help .= &quot;Seriously, you better know what you are doing if you use this option.  &quot;;
+    $help .= &quot;It will remove the lock file if it exists.  This is not advised unless you are sure the lock &quot;;
+    $help .= &quot;file is stale.  You can potential have multiple ipblocker parent processes running at the &quot;;
+    $help .= &quot;same time.  This will cause problems.  You have been warned. &quot;;
+    $ap-&gt;add_arg(
+        &#39;--forceremovelockfile&#39;,
+        type    =&gt; &#39;Bool&#39;,
+        dest    =&gt; &#39;forceremovelockfile&#39;,
+        default =&gt; 0,
+        help    =&gt; $help,
+    );
+
+    $ap-&gt;add_arg(
+        &#39;--dumpconfigsandexit&#39;,
+        type    =&gt; &#39;Bool&#39;,
+        dest    =&gt; &#39;dumpconfigsandexit&#39;,
+        default =&gt; 0,
+        help    =&gt; &#39;Dump the configs and exit&#39;,
+    );
+
+    $ap-&gt;add_arg(
+        &#39;--cycles&#39;,
+        type =&gt; &#39;Scalar&#39;,
+        dest =&gt; &#39;cycles&#39;,
+        help =&gt; &#39;How many times to cycle through the queue before exiting.  Default is LONG_MAX (a large integer).&#39;,
+    );
+
+    $ap-&gt;add_arg(
+        &#39;--configsfile&#39;,
+        type =&gt; &#39;Scalar&#39;,
+
+        # dest =&gt; &#39;configsfile&#39;,
+        default =&gt; &#39;/etc/ipblocker/ipblocker.conf&#39;,
+        help    =&gt; &#39;The configuration file to use&#39;,
+    );
+
+    return $ap-&gt;parse_args();
+} ## end sub setupArgParse</code></pre>
 
 <h1 id="AUTHOR">AUTHOR</h1>
 
