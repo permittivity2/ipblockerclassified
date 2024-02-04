@@ -697,6 +697,11 @@ sub review_log() {
     $TID = "TID: " . $TID;
     my $start_time = time();
 
+    # Get the right sub for grepping regexps for the log
+    my $module = $logobj->{grepmodule} || 'Net::IPBlocker::GrepRegexpsDefault';
+    eval "require $module" or $logger->logdie("Unable to require $module: $@");
+    $self->grep_regexps = $module->can('grep_regexps');
+
     $logobj ||= {};
     my $chain = $self->{configs}->{chainprefix} . $logobj->{chain};
     $logger->info("$TID|Starting review of $logobj->{file} with chain $chain");
@@ -719,7 +724,7 @@ sub review_log() {
     # Add rule for chain onto global chain
     my $globalchain = $self->{configs}->{globalchain};
     $logger->debug("$TID|Adding rule to iptablesqueue: -A $globalchain -j $chain");
-    $self->iptablesqueue_enqueue( { options => "-A", rule => "$globalchain -j $chain" } ) || return 0;
+    $self->iptablesqueue_enqueue( { options => "-A", rule => "$globalchain -j $chain" } ) || return 0; 
 
     $self->add_logger_allow_deny_ips($logobj);
 
@@ -732,7 +737,7 @@ sub review_log() {
         my $start_loop_time = time();
         $logger->info("$TID|$cyclesleft cycles remaining for $logobj->{file}.");
         $logobj = $self->readlogfile($logobj);
-        $logobj->{ips_to_block} = $self->_grep_regexps($logobj) if ( $logobj->{logcontents} );
+        $logobj->{ips_to_block} = $self->grep_regexps($logobj) if ( $logobj->{logcontents} );
 
         $logger->debug( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
           if ( $logger->is_debug() );
@@ -811,7 +816,7 @@ sub review_log() {
     $logmsg .= "  out of $cycles requested. Total run time: $runtime seconds";
     $logger->info($logmsg);
     return 1;
-} ## end sub review_log
+} ## end sub review_log 
 
 # Description:  Reads the log file (if one exists) from $self->{configsfile}
 #               If $args is passed to new(), then clargs (command line arguments) will override the configs file
@@ -1263,7 +1268,7 @@ sub readlogfile {
 #               IP address on each line.
 # Requires:     $self, $log
 # Returns:      Hash reference of IP addresses with count of how many times the IP address was found
-sub _grep_regexps {
+sub grep_regexps {
     my ( $self, $log ) = @_;
     my $TID = "TID: " . threads->tid;
 
@@ -1298,7 +1303,7 @@ sub _grep_regexps {
     $logger->info($log_msg);
 
     return $matches;
-} ## end sub _grep_regexps
+} ## end sub grep_regexps
 
 # Description:  Adds a chain to iptables
 #               Also adds the chain to $tracker
