@@ -10,13 +10,12 @@ use List::Util qw(any);
 use Time::HiRes qw(usleep gettimeofday time);
 use Config::File;
 use Carp;
-use Log::Log4perl qw(get_logger :nowarn :levels);
-use Log::Any qw($log);
+use Log::Any qw($log);  # Allegedly handles lots of different logging modules
 use Data::Dumper;
 use Regexp::IPv6     qw($IPv6_re);
 use LockFile::Simple qw(lock trylock unlock);
 use File::Path       qw(make_path);
-use Net::Ifconfig::Wrapper;
+# use Net::Ifconfig::Wrapper;  # Not yet implemented
 
 # Thread setup
 use threads;
@@ -72,19 +71,14 @@ my $DEFAULTS = {
     ignoreinterfaceips   => 1,                                   #This adds the IPs from the interfaces to the allowlist
     iptables             => '/sbin/iptables',
     lockfile             => '/var/run/ipblocker.run.default',
-    log4perlconf         => '/etc/ipblocker/log4perl.conf',
-    loglevel             => 'Will use value from log4perl.conf', # Can be set from calling script.
-                                                                 #   If no value sent from calling script, then
-        #   use value from configs file.  If no value in configs file then I think the
-        #   Easy Init log4perl is used which defaults to DEBUG, i think.
-    logcontents       => {},
-    logs_to_review    => {},
-    logwatch_interval => 3,
-    prodmode          => 0,
-    queuechecktime    => 1,
-    queuecycles       => LONG_MAX,
-    readentirefile    => 0,
-    totalruntime      => LONG_MAX,  # How long to run in seconds.  This is irrespective of any other cycle or queue 
+    logcontents          => {},
+    # loglevel             => 'INFO',
+    logs_to_review       => {},
+    prodmode             => 0,
+    queuechecktime       => 1,
+    queuecycles          => LONG_MAX,
+    readentirefile       => 0,
+    totalruntime         => LONG_MAX,  # How long to run in seconds.  This is irrespective of any other cycle or queue 
                                     # cycle.  Nice for testing or maybe you want to run this for a certain amount of 
                                     # time and restart it out of cron or something.
 };
@@ -396,10 +390,9 @@ sub new() {
     } ## end if ( $self->{configs}->...)
 
     # Setup logging.
-    # $logger = $self->setup_Logger();
     $logger = $log;  #From Log::Any
     $logger->info("Logging initialized and ready to go");
-    $logger->debug( "Dumping self: " . Dumper($self) ) if ( $logger->is_debug() );
+    $logger->debug( "Dumping self: " . Dumper($self) ) if ( $logger->is_debug() ); 
 
     return $self;
 } ## end sub new
@@ -441,8 +434,9 @@ This is where the action starts.  This is called from the script that uses this 
 new() is instantiated.
 
 This creates a thread for each log watcher and a thread for the iptables queue watcher.
-If you have 5 files to watch, then there will be 5 threads watching those files + 1 thread to add commands to 
-iptables.
+As an example, if you have 5 files to watch, then there will be 5 threads watching those files + 1 thread to add commands to 
+iptables.  Worst case scenario, you may need 1 CPU per thread (at most).  
+However, that is very unlikely because the timing of processing will vary and it is not really a 1:1 ratio.
 
 =cut
 
@@ -482,12 +476,21 @@ sub go() {
     $logger->logdie("$TID|Unable to review logs") unless ( $self->logger_thread() );
 
     my $totalruntime = $self->{configs}->{totalruntime};
-    while ($totalruntime > 0 ) {
-        $totalruntime--;
+    my $timeleft     = $totalruntime;
+    while ($timeleft > 0 ) {
+        $timeleft--;
         sleep 1;
-        my $logmsg = "$TID|Runtime remaining: $totalruntime second(s).  ";
+        my $logmsg = "$TID|Runtime remaining: $timeleft second(s).  ";
         $logmsg .= sprintf("Elapsed time: %0.3f second(s)", (time() - $start_time) );
         $logger->debug($logmsg);
+        my $queuestate = $IptablesQueue->pending();
+        my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
+        if ( !defined $iptablesQueue_pending ) {
+            my $logmsg = "$TID|IptablesQueue is in an undefined state. This is probably intentional. ";
+            $logmsg .= "Exiting.";
+            $logger->info($logmsg);
+            last;
+        } ## end if ( !defined $iptablesQueue_pending)
     } ## end while ($cycles)
 
     my $runtime = time() - $start_time;
@@ -495,7 +498,7 @@ sub go() {
     $logger->info("$TID|Module runtime: $runtime second(s)");
     $logger->info("$TID|Trying to run a graceful stop....");
     my $args = {
-        chains_created      => $tracker->{chains_created},
+        chains_created => $tracker->{chains_created},
     };
     $self->stop( $args ) && return 1;
     $logger->error("$TID|Unable to complete a graceful stop.  Exiting the hard way.");
@@ -512,6 +515,7 @@ sub iptables_thread() {
 
     my $cyclesleep = $self->{configs}->{queuechecktime};
     my $cycles     = $self->{configs}->{queuecycles};
+    my $cyclesleft = $cycles;
     my $logmsg     = "$TID|Starting iptables queue watching thread with $cycles cycles and $cyclesleep seconds";
     $logmsg .= " between cycles";
     $logger->info($logmsg);
@@ -520,7 +524,7 @@ sub iptables_thread() {
         my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
         if ( !defined $iptablesQueue_pending ) {
             my $logmsg = "$TID|IptablesQueue is in an undefined state. This is probably intentional. ";
-            $logmsg .= "Exiting the loop.";
+            $logmsg .= "Exiting the IP Tables Thread.";
             $logger->info($logmsg);
             last;
         } ## end if ( !defined $iptablesQueue_pending)
@@ -534,13 +538,17 @@ sub iptables_thread() {
             $IPTABLESRUNLINE = $IPTABLESRUNLINE - 1;
         } ## end if ( $iptablesQueue_pending...)
         elsif ( $iptablesQueue_pending == 0 ) {
-
             # This is a bit of extra logging but if we are at this point, speed is not an issue
             my $logmsg = "$TID|IptablesQueue depth is 0 so sleeping for $cyclesleep second";
             $logmsg .= "s" if ( $cyclesleep != 1 );
             $logmsg .= ".";
             $logger->info($logmsg);
             usleep $cyclesleep * 1000000;
+            $cyclesleft--;
+            if ( $cyclesleft <= 0 ) {
+                $logger->info("$TID|IptablesQueue thread has reached the end of its cycles. Setting queue to end.");
+                $IptablesQueue->end();
+            } ## end if ( $cyclesleft <= 0)            
         } ## end elsif ( $iptablesQueue_pending...)
         else {
             $logger->error("$TID|IptablesQueue queue is in an unknown state. Exiting due to an unknown issue.");
@@ -550,7 +558,7 @@ sub iptables_thread() {
 } ## end sub iptables_thread
 
 # Description:  Adds IPs on the local interfaces to the global allowlist
-#  This does not work because it only handles IPv4 addresses and other issues
+#               This does not work because it only handles IPv4 addresses and other issues
 sub add_ifconfig_ips_to_allowlist() {
     my $self = shift;
     return 1;
@@ -680,7 +688,7 @@ sub prepare_directions() {
 # Future:       This entire sub needs to be refactored.
 #               It's easy to folllow but it is:
 #                 a) just too many lines for one sub
-#                 b) the for loops nesting is just too much
+#                 b) way too heavily nested!
 # Requires:     $self, $logobj
 # Returns:      1
 sub review_log() {
@@ -696,6 +704,7 @@ sub review_log() {
 
     # set file log values if exist, otherwise set to global values if exist else set to default values
     my $cycles          = $logobj->{cycles}     ||= LONG_MAX;
+    my $cyclesleft      = $cycles;
     my $cyclesleep      = $logobj->{cyclesleep} ||= 0.5;
     my $microcyclesleep = $cyclesleep * 1000000;
 
@@ -719,13 +728,11 @@ sub review_log() {
     my @protocols  = $logobj->{protocols} ? split( /\W+/, $logobj->{protocols} ) : ();
     my $ports      = $logobj->{ports} || '';
 
-    while ( $cycles > 0 ) {
+    while ( $cyclesleft > 0 ) {
         my $start_loop_time = time();
-        $logger->info("$TID|$cycles cycles remaining for $logobj->{file}.");
+        $logger->info("$TID|$cyclesleft cycles remaining for $logobj->{file}.");
         $logobj = $self->readlogfile($logobj);
         $logobj->{ips_to_block} = $self->_grep_regexps($logobj) if ( $logobj->{logcontents} );
-
-        # $logobj                 = $self->clean_ips_to_block_allowdeny($logobj);
 
         $logger->debug( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
           if ( $logger->is_debug() );
@@ -733,7 +740,6 @@ sub review_log() {
         my @rules;
         foreach my $ip ( keys %{ $logobj->{ips_to_block} } ) {
             $logger->debug("$TID|IP to potentially block: $ip");
-
             foreach my $direction (@directions) {
                 my $direction_switch = $direction eq 'destination' ? '-d' : '-s';
                 my $randval          = int( rand(2) );
@@ -742,24 +748,22 @@ sub review_log() {
                 my $base_rule = "$direction_switch $ip";
                 $logger->debug("$TID|Base rule: $base_rule");
 
-                if (@protocols) {
-                    foreach my $protocol (@protocols) {
-                        my $rule = $base_rule . " -p $protocol";
-                        $logger->debug("$TID|Rule: $rule");
-                        if ( $logobj->{ports} ) {
-
-                            # As an example the following line looks something like:
-                            # -m multiport --dports 80,443 -j DROP
-                            $rule .= " -m multiport -$direction_switch" . "port $logobj->{ports}";
-                        } ## end if ( $logobj->{ports} )
-                        $logger->debug("$TID|Pushing rule: $rule");
-                        push @rules, "$rule -j DROP";
-                    } ## end foreach my $protocol (@protocols)
-                } ## end if (@protocols)
-                else {
+                if ( ! @protocols ) {
                     $logger->debug("$TID|Pushing rule: $base_rule");
                     push @rules, "$base_rule -j DROP";
+                    next;
                 }
+                foreach my $protocol (@protocols) {
+                    my $rule = $base_rule . " -p $protocol";
+                    $logger->debug("$TID|Rule: $rule");
+                    if ( $logobj->{ports} ) {
+                        # As an example the following line looks something like:
+                        # -m multiport --dports 80,443 -j DROP
+                        $rule .= " -m multiport -$direction_switch" . "port $logobj->{ports}";
+                    } ## end if ( $logobj->{ports} )
+                    $logger->debug("$TID|Pushing rule: $rule");
+                    push @rules, "$rule -j DROP";
+                } ## end foreach my $protocol (@protocols)
             } ## end foreach my $direction (@directions)
         } ## end foreach my $ip ( keys %{ $logobj...})
 
@@ -795,16 +799,16 @@ sub review_log() {
         $timediff = sprintf( "%.4f", $timediff );
         $logger->info("$TID| Review of $chain took $timediff seconds");
 
-        last unless --$cycles;    # Break out of loop if $cycles is 0
-        $logger->info("$TID|Sleeping for $cyclesleep seconds");
+        last unless --$cyclesleft;    # Break out of loop if $cyclesleft is 0
+        $logger->debug("$TID|Sleeping for $cyclesleep seconds");
         usleep($microcyclesleep);
-    } ## end while ( $cycles > 0 )
+    } ## end while ( $cyclesleft > 0 )
 
     my $runtime = time() - $start_time;
     $runtime = sprintf( "%.4f", $runtime );
-    my $cycles_completed = $logobj->{cycles} - $cycles;
-    my $logmsg           = "$TID|Finished reviewing $logobj->{file}.  Cycles completed: $cycles_completed.  ";
-    $logmsg .= "  Total run time: $runtime seconds";
+    my $cycles_completed = $logobj->{cycles} - $cyclesleft;
+    my $logmsg           = "$TID|Finished reviewing $logobj->{file}.  Cycles completed: $cycles_completed";
+    $logmsg .= "  out of $cycles requested. Total run time: $runtime seconds";
     $logger->info($logmsg);
     return 1;
 } ## end sub review_log
@@ -1418,17 +1422,23 @@ sub add_logger_allow_deny_ips() {
 
 } ## end sub add_logger_allow_deny_ips
 
-# Stops the module
-#  Future enhancements:
-#   Clear the thread queues
+# Description:  Stops the module, gracefully (or at least tries to)
+#               Removes the chains that were created (or tried to be created) and removes the iptables rules that were
+#               added (or tried to be added)
+# Requires:     $self
+#               $args which is really a hash reference for $tracker
+#                   $args->{chains_created} --> chains created (or tried to be created)
+#                   $args->{iptables_rules} --> iptables rules that were added (or tried to be added)
+# Returns:      1 if successful, otherwise 0
 sub stop() {
     my ( $self, $args ) = @_;
     my $TID = threads->tid;
     $TID = "TID: " . $TID;
     $logger->info("Setting IptablesQueue to end");
 
-    my $chains_created = $args->{chains_created} ||= {};
-    $logger->debug( "$TID|Dump of tracker: " . Dumper($tracker) ) if $logger->is_debug();
+    my $chains_created = $args->{chains_created} ||= $tracker->{chains_created} ||= {};
+    my $iptables_rules = $args->{iptables_rules} ||= $tracker->{iptables_rules} ||= {};
+    # $logger->debug( "$TID|Dump of tracker: " . Dumper($tracker) ) if $logger->is_debug();
 
     # Removing chains that were created (or tried to be created)
     my @chains_to_remove = ();
@@ -1472,6 +1482,16 @@ sub stop() {
 #   Some of the threads could be reading a log file and if the log file is large then it could take a while or
 #   if the log file is causing soem kind of blocking for reading then it could take a while.
 #   This may be an issue, if an example, if trying to read a file across NFS or SSHFS and there is a network issue.
+
+
+# Description:  Joins all threads
+#               This needs some rework.
+#               If a thread is taking a while to join then it will block the other threads from joining.
+#               Some of the threads could be reading a log file and if the log file is large then it 
+#               could take a while or if the log file is causing some kind of blocking for reading then it 
+#               could take a while.
+#               This may be an issue if trying to read a file across NFS or SSHFS and there is a network issue.
+# Returns:      1 if successful.
 sub join_threads() {
     my $TID = threads->tid;
     $TID = "TID: " . $TID;
@@ -1480,7 +1500,8 @@ sub join_threads() {
     return 1;
 } ## end sub join_threads
 
-# Clears the queues
+# Description:  Clears the queues
+# Returns:      1 if successful, otherwise 0
 sub clear_queues() {
     my $TID = threads->tid;
     $TID = "TID: " . $TID;
@@ -1501,6 +1522,9 @@ sub clear_queues() {
     }
 } ## end sub clear_queues
 
+
+# Description:  Reloads the module
+#               This is not yet implemented
 sub reload() {
     my $TID = threads->tid;
     $TID = "TID: " . $TID;
@@ -1528,38 +1552,39 @@ sub reload() {
     # $self->iptables_thread();
 } ## end sub reload
 
-#Description: This sub is run when signal interrupt is caught
-#  This is ctrl-c (not yet fully implemented)
+#Description:   This sub is run when signal interrupt is caught
+#               We try to do a graceful stop when ctrl-c/SIG-Interrupt- is pressed
 sub SIG_INT {
     $logger->info("Caught interrupt signal");
     stop();
     exit 0;
 }
 
-#Description: This sub is run when signal hup is caught
-#  Request to reload configs (not yet fully implemented)
+#Description:   This sub is run when signal hup is caught
+#               Not fully implemented because reload is not fully implemented
 sub SIG_HUP {
     $logger->info("Caught HUP signal");
     reload();
 }
 
-#Description: This sub is run when signal term is caught
-#  Request to gracefully quit  (not yet fully implemented)
+#Description:   This sub is run when signal term is caught
+#               Just calls stop()
 sub SIG_TERM {
     $logger->info("Caught TERM signal");
     stop();
 }
 
-#Description: This sub is run when signal quit is caught
-#  Request to less than gracefully quit  (not yet fully implemented)
+#Description:   This sub is run when signal quit is caught
+#               Just calls stop()
 sub SIG_QUIT {
     my $self = shift;
     stop();
 }
 
+
+# Description:  Sets the signal handlers
 sub set_signal_handler() {
     $logger->info("Setting signal handlers");
-
     $SIG{INT}  = \&SIG_INT;
     $SIG{TERM} = \&SIG_TERM;
     $SIG{HUP}  = \&SIG_HUP;

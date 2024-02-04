@@ -24,7 +24,7 @@
     <ul>
       <li><a href="#new">new</a>
         <ul>
-          <li><a href="#All-arguments-to-new-and-their-defaults">All arguments to new() and their defaults</a>
+          <li><a href="#All-arguments-to-new-and-the-defaults">All arguments to new() and the defaults</a>
             <ul>
               <li><a href="#allowdeny">allowdeny</a></li>
               <li><a href="#allowlist">allowlist</a></li>
@@ -44,6 +44,7 @@
               <li><a href="#queuechecktime">queuechecktime</a></li>
               <li><a href="#queuecycles">queuecycles</a></li>
               <li><a href="#readentirefile">readentirefile</a></li>
+              <li><a href="#totalruntime">totalruntime</a></li>
             </ul>
           </li>
         </ul>
@@ -134,7 +135,7 @@ $foo-&gt;go();</code></pre>
 
 <h2 id="new">new</h2>
 
-<p>Reads configs, logging configs, sets up logging, sets up a class and returns a blessed object The sub go() is where the action starts</p>
+<p>Reads configs form a file if exists otherwise uses defaults. Sets up a class and returns a blessed &quot;object&quot;. The sub go() is where the action starts. The sub new() just gets a few things setup.</p>
 
 <p>Example:</p>
 
@@ -153,12 +154,12 @@ my $args = {
   readentirefile      =&gt; &#39;0&#39;, # True false value --- Determines if the entire log file is read or
                               # new entries since last run are read.
   cycles              =&gt; &#39;LONG_MAX&#39;, # How many times to run the main loop.  LONG_MAX is the default.
+  ### All configs can be set via a hash reference
 };
 
-my $ipb    = IPblocker-&gt;new($args);
-my $logger = $ipb-&gt;{logger};</code></pre>
+my $ipb    = IPblocker-&gt;new($args);</code></pre>
 
-<h3 id="All-arguments-to-new-and-their-defaults">All arguments to new() and their defaults</h3>
+<h3 id="All-arguments-to-new-and-the-defaults">All arguments to new() and the defaults</h3>
 
 <h4 id="allowdeny">allowdeny</h4>
 
@@ -282,11 +283,17 @@ my $logger = $ipb-&gt;{logger};</code></pre>
 
 <p>This is a true/false value. If set to 1 (true), then the entire log file is read. If set to 0 (false), then only new entries since the last run are read. This can aslo be set per log file in the configs file.</p>
 
+<h4 id="totalruntime">totalruntime</h4>
+
+<p>totalruntime =&gt; LONG_MAX,</p>
+
+<p>How long to run in seconds. This is irrespective of any other cycle or queue cycle. Nice for testing or maybe you want to run this for a certain amount of time and restart it out of cron or something.</p>
+
 <h2 id="go">go</h2>
 
 <p>This is where the action starts. This is called from the script that uses this module after new() is instantiated.</p>
 
-<p>This creates a thread for each log watcher and a thread for the iptables queue watcher. If you have 5 files to watch, then there will be 5 threads watching those files + 1 thread to add commands to iptables.</p>
+<p>This creates a thread for each log watcher and a thread for the iptables queue watcher. As an example, if you have 5 files to watch, then there will be 5 threads watching those files + 1 thread to add commands to iptables. Worst case scenario, you may need 1 CPU per thread (at most). However, that is very unlikely because the timing of processing will vary and it is not really a 1:1 ratio.</p>
 
 <h1 id="Sample-config-file">Sample config file</h1>
 

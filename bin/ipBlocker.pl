@@ -1,5 +1,4 @@
 #!/usr/bin/perl -w
-##!/usr/local/perl/localperl/perl-5.32.0/bin/perl -w
 #vim: noai:ts=4:sw=4
 
 use strict;
@@ -7,7 +6,6 @@ use warnings;
 use lib '/home/gardner/git/ipblockerclassified/Net-IPBlocker/lib/';
 use Net::IPBlocker;
 use Log::Any::Adapter;
-Log::Any::Adapter->set('Log4perl');
 use Log::Log4perl qw(get_logger);
 use Data::Dumper;
 use Getopt::ArgParse;
@@ -17,24 +15,29 @@ use List::Util qw(any);
 $Data::Dumper::Sortkeys = 1;
 $Data::Dumper::Indent   = 1;
 
-my $logger = get_logger();    # This will change to the IPblocker object's logger when it is instantiated
+Log::Any::Adapter->set('Log4perl');
+
+my $logger = get_logger();
 
 main();
+
+### Subroutines below here ###
 
 sub main {
 
     # Setup command line options
     my $clargs = setupArgParse();
 
-    # Setup logging
-    my $logargs = {
-        log4perlconf            => $clargs->log4perlconf,
-        logwatch_interval       => $clargs->logwatch_interval,
-        loglevel                => $clargs->loglevel,
-    };
-    my $logger = setup_logger( $logargs );
+    if ( $clargs->loglevel && $clargs->log4perlconf ) {
+        my $msg = "You cannot use --loglevel and --log4perlconf at the same time.  Choose one or the other.  ";
+        $msg .= "This is because the loglevel in the log4perl config file will override the command line loglevel.  ";
+        $msg .= "So, just drop the --loglevel option and use the --log4perconf or vice versa.\n\n";
+        croak $msg;
+    }
 
-    # Setup IPblocker object
+    my $logger = setup_logger( $clargs );
+
+    # Setup IPBlocker arguments
     my $ipbArgs = {
         configsfile         => $clargs->configsfile,
         dumpconfigsandexit  => $clargs->dumpconfigsandexit,
@@ -42,8 +45,6 @@ sub main {
         # ignoreinterfaceips  => $clargs->ignoreinterfaceips,  # Not yet implemented
         iptables            => $clargs->iptables,
         lockfile            => $clargs->lockfile,
-        # log4perlconf        => $clargs->log4perlconf,
-        loglevel            => $clargs->loglevel,
         prodmode            => $clargs->prodmode,
         queuechecktime      => $clargs->queuechecktime,
         queuecycles         => $clargs->queuecycles,
@@ -52,7 +53,6 @@ sub main {
     };
 
     my $ipb    = Net::IPBlocker->new($ipbArgs);
-    # my $logger = $ipb->{logger} || get_logger();
 
     $logger->info("About to go!");
 
@@ -60,33 +60,69 @@ sub main {
     $ipb->go();
 } ## end sub main
 
-sub setup_logger() {
+sub setup_logger {
+    my ($clargs) = @_;
 
-    my ( $args ) = @_;
+    # Check if log4perl configuration is specified
+    if ($clargs->log4perlconf) {
+        # Check if the specified configuration file is readable
+        croak "\nUnable to read log4perl config file >> $clargs->log4perlconf <<\n" unless -r $clargs->log4perlconf;
 
-    $args->{log4perlconf}    ||= '/etc/ipblocker/log4perl.conf';
-    $args->{logwatch_interval} ||= 5;
-    $args->{loglevel}        ||= 'INFO';
-    my $log4perlconf         = $args->{log4perlconf};
-    my $logwatch_interval    = $args->{logwatch_interval};
-    my $loglevel             = $args->{loglevel};
-
-    # Setup logging.  If there is an error, then log to STDOUT at DEBUG level with easy_init()
-    eval { Log::Log4perl->init_and_watch( $log4perlconf, $logwatch_interval ); };
-    if ($@) {
-        carp "Unable to initialize logging from config file >>$log4perlconf<<: $@";
-        carp "Logging to STDOUT at DEBUG level\n";
-        Log::Log4perl->easy_init($Log::Log4perl::DEBUG);
+        # Initialize Log4perl based on whether a logwatch interval is specified
+        if ($clargs->logwatch_interval) {
+            Log::Log4perl->init_and_watch($clargs->log4perlconf, $clargs->logwatch_interval);
+        } else {
+            Log::Log4perl->init($clargs->log4perlconf);
+        }
+    } else {
+        # Setup default logging configuration if no log4perl configuration is specified
+        my $loglevel = $clargs->loglevel || 'WARN';  # Default log level
+        my $conf = qq(
+            log4perl.rootLogger                                 = $loglevel, Screen
+            log4perl.appender.Screen                            = Log::Log4perl::Appender::Screen
+            log4perl.appender.Screen.stderr                     = 0
+            log4perl.appender.Screen.layout                     = Log::Log4perl::Layout::PatternLayout
+            log4perl.appender.Screen.layout.ConversionPattern   = %d|%p|%l|%m{chomp}%n
+        );
+        Log::Log4perl->init(\$conf);
     }
-    $logger = get_logger() || croak "Unable to get logger";
-    if ( any { $_ eq $loglevel } qw/ DEBUG INFO WARN ERROR FATAL TRACE / ) {
-        $logger->level( $loglevel );
-        $logger->info( "Log level set to $loglevel aka ( $logger->level() )" );
-    }
-    $logger->info("Logging initialized");
 
+    # Attempt to get the logger
+    my $logger = get_logger() || croak "Unable to get logger";
     return $logger;
-} ## end sub setup_Logger
+}
+
+
+# sub setup_logger() {
+#     my ( $clargs ) = @_;
+
+#     if ( $clargs->log4perlconf ) {
+#         if ( -r $clargs->log4perlconf ) {
+#             if ( $clargs->logwatch_interval ) {
+#                 Log::Log4perl->init_and_watch($clargs->log4perlconf, $clargs->logwatch_interval);
+#             }
+#             else {
+#                 Log::Log4perl->init($clargs->log4perlconf);
+#             }
+#         } else {
+#             croak "Unable to read log4perl config file >> $clargs->log4perlconf <<";
+#         }
+#     }
+#     else {
+#         my $loglevel = $clargs->loglevel;
+#         my $conf = qq(
+#             log4perl.rootLogger                                 = $loglevel, Screen
+#             log4perl.appender.Screen                            = Log::Log4perl::Appender::Screen
+#             log4perl.appender.Screen.stderr                     = 0
+#             log4perl.appender.Screen.layout                     = Log::Log4perl::Layout::PatternLayout
+#             log4perl.appender.Screen.layout.ConversionPattern   = %d|%p|%l|%m{chomp}%n                
+#         );         
+#         Log::Log4perl->init(\$conf);
+#     }
+
+#     $logger = get_logger() || croak "Unable to get logger";
+#     return $logger;
+# } ## end sub setup_Logger
 
 # Setup command line options
 # This is often a lengthy subroutine so making it last is a probably good idea for readability
@@ -163,6 +199,7 @@ sub setupArgParse {
         '--loglevel',
         choices => [qw(TRACE DEBUG INFO WARN ERROR FATAL)],
         dest    => 'loglevel',
+        default => 'INFO',
         help    => 'The log level to use',
     );
 
@@ -170,7 +207,6 @@ sub setupArgParse {
         '--log4perlconf',
         type    => 'Scalar',
         dest    => 'log4perlconf',
-        default => '/etc/ipblocker/log4perl.conf',
         help    => 'The log4perl configuration file to use',
     );
 
