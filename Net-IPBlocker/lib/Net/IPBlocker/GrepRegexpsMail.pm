@@ -1,8 +1,6 @@
 # FILEPATH: Untitled-1
 
-package Net::IPBlocker::GrepRegexpsDefault;
-
-# parent Net::IPBlocker;
+package Net::IPBlocker::GrepRegexpsMail;
 
 use strict;
 use warnings;
@@ -10,6 +8,11 @@ use Exporter;
 use Regexp::IPv6     qw($IPv6_re);
 use Log::Any qw($log);  # Allegedly handles lots of different logging modules
 use threads;
+use Data::Dumper;
+
+local $Data::Dumper::Sortkeys = 1;
+local $Data::Dumper::Indent   = 1;
+
 our @EXPORT_OK = qw(grep_regexps);
 
 my $logger = $log;
@@ -52,8 +55,12 @@ sub grep_regexps {
     my $TID = "TID: " . threads->tid;
     $logger->debug("$TID|In grep_regexps in " . __PACKAGE__ . " module.");
 
+    $logger->info("$TID|Dumper of log object: " . Dumper($log));
+
     my $matches      = {};
     my @log_contents = @{ $log->{logcontents} };
+
+    $logger->info("$TID|Dumper of log contents: " . Dumper(\@log_contents));
 
     return {} if ( !@log_contents );
 

@@ -15,6 +15,7 @@ use Data::Dumper;
 use Regexp::IPv6     qw($IPv6_re);
 use LockFile::Simple qw(lock trylock unlock);
 use File::Path       qw(make_path);
+use lib;
 # use Net::Ifconfig::Wrapper;  # Not yet implemented
 
 # Thread setup
@@ -682,6 +683,30 @@ sub prepare_directions() {
     return @directions;
 } ## end sub prepare_directions
 
+sub get_grepmodule {
+    my ($self, $logobj) = @_;
+    my $TID = "TID: " . threads->tid;
+    lib->import($logobj->{libpath}) if ( $logobj->{libpath} );
+    my $grepmodule = $logobj->{grepmodule} || 'Net::IPBlocker::GrepRegexpsDefault';
+
+    $logger->info("$TID|Trying to require $grepmodule");
+    if ( $grepmodule =~ m/::/ ) {
+        eval "require $grepmodule";
+    } else {
+        eval require $grepmodule;
+    }
+    # eval require $grepmodule; # This works for both module names and paths
+
+    if ($@) {
+        $logger->error("$TID|Unable to require $grepmodule: $@");
+        return 0;
+    } else {
+        $logger->info("$TID|Successfully required $grepmodule");
+    }
+
+    return $grepmodule;
+}
+
 # Description:  Reads the log file and adds IPs to the iptables queue
 #               This is called as a thread and runs a loop to check the log file for new entries
 #               Prior to checking the log file, it creates a chain for the log file and adds it to the global chain
@@ -690,7 +715,7 @@ sub prepare_directions() {
 #                 a) just too many lines for one sub
 #                 b) way too heavily nested!
 # Requires:     $self, $logobj
-# Returns:      1
+# Returns:      1 (usually) but could return 0 if something goes wrong
 sub review_log() {
     my ( $self, $logobj ) = @_;
     my $TID = threads->tid;
@@ -698,9 +723,11 @@ sub review_log() {
     my $start_time = time();
 
     # Get the right sub for grepping regexps for the log
-    my $module = $logobj->{grepmodule} || 'Net::IPBlocker::GrepRegexpsDefault';
-    eval "require $module" or $logger->logdie("Unable to require $module: $@");
-    $self->grep_regexps = $module->can('grep_regexps');
+    my $grepmodule = $self->get_grepmodule($logobj);
+    if ( !$grepmodule ) {
+        $logger->error("$TID|Unable to get grepmodule.  Exiting thread for $logobj->{file}.");
+        return 0;
+    }
 
     $logobj ||= {};
     my $chain = $self->{configs}->{chainprefix} . $logobj->{chain};
@@ -737,7 +764,9 @@ sub review_log() {
         my $start_loop_time = time();
         $logger->info("$TID|$cyclesleft cycles remaining for $logobj->{file}.");
         $logobj = $self->readlogfile($logobj);
-        $logobj->{ips_to_block} = $self->grep_regexps($logobj) if ( $logobj->{logcontents} );
+        # $logobj->{ips_to_block} = $self->grep_regexps($logobj) if ( $logobj->{logcontents} );
+        $logger->debug("$TID|Log object: " . Dumper($logobj)) if ( $logger->is_debug() );
+        $logobj->{ips_to_block} = $grepmodule->grep_regexps($logobj) if ( $logobj->{logcontents} );
 
         $logger->debug( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
           if ( $logger->is_debug() );
@@ -1268,42 +1297,42 @@ sub readlogfile {
 #               IP address on each line.
 # Requires:     $self, $log
 # Returns:      Hash reference of IP addresses with count of how many times the IP address was found
-sub grep_regexps {
-    my ( $self, $log ) = @_;
-    my $TID = "TID: " . threads->tid;
+# sub grep_regexps {
+#     my ( $self, $log ) = @_;
+#     my $TID = "TID: " . threads->tid;
 
-    my $matches      = {};
-    my @log_contents = @{ $log->{logcontents} };
+#     my $matches      = {};
+#     my @log_contents = @{ $log->{logcontents} };
 
-    return {} if ( !@log_contents );
+#     return {} if ( !@log_contents );
 
-    # DO NOT SORT NUMERICALLY!  The info in the configs states the order is sorted alphabetically
-    foreach my $regex ( sort keys %{ $log->{regexpdeny} } ) {
-        my $pattern = $log->{regexpdeny}{$regex};
-        $logger->debug("$TID|Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
+#     # DO NOT SORT NUMERICALLY!  The info in the configs states the order is sorted alphabetically
+#     foreach my $regex ( sort keys %{ $log->{regexpdeny} } ) {
+#         my $pattern = $log->{regexpdeny}{$regex};
+#         $logger->debug("$TID|Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
 
-        my @current_matches = grep { /$pattern/ } @log_contents;
-        $logger->debug( "$TID|Dumper of current matches: " . Dumper(@current_matches) ) if $logger->is_debug();
+#         my @current_matches = grep { /$pattern/ } @log_contents;
+#         $logger->debug( "$TID|Dumper of current matches: " . Dumper(@current_matches) ) if $logger->is_debug();
 
-        foreach my $line (@current_matches) {
-            chomp($line);
-            $logger->debug("$TID|Checking >>$line<< for IP address");
+#         foreach my $line (@current_matches) {
+#             chomp($line);
+#             $logger->debug("$TID|Checking >>$line<< for IP address");
 
-            foreach my $ip_address ( $line =~ /$REGEX_IPV4/g, $line =~ /$REGEX_IPV6/g ) {
-                $matches->{$ip_address}++;
-                $logger->debug("$TID|Found IP address: $ip_address");
-            }
-        } ## end foreach my $line (@current_matches)
-    } ## end foreach my $regex ( sort keys...)
+#             foreach my $ip_address ( $line =~ /$REGEX_IPV4/g, $line =~ /$REGEX_IPV6/g ) {
+#                 $matches->{$ip_address}++;
+#                 $logger->debug("$TID|Found IP address: $ip_address");
+#             }
+#         } ## end foreach my $line (@current_matches)
+#     } ## end foreach my $regex ( sort keys...)
 
-    $logger->debug( "$TID|Dump of IP matches after all regex comparisons: " . Dumper($matches) ) if $logger->is_debug();
+#     $logger->debug( "$TID|Dump of IP matches after all regex comparisons: " . Dumper($matches) ) if $logger->is_debug();
 
-    my $log_msg = "$TID|Matched IP addresses to be reviewed for potential blocking: ";
-    $log_msg .= join( ",", keys %{$matches} );
-    $logger->info($log_msg);
+#     my $log_msg = "$TID|Matched IP addresses to be reviewed for potential blocking: ";
+#     $log_msg .= join( ",", keys %{$matches} );
+#     $logger->info($log_msg);
 
-    return $matches;
-} ## end sub grep_regexps
+#     return $matches;
+# } ## end sub grep_regexps
 
 # Description:  Adds a chain to iptables
 #               Also adds the chain to $tracker
