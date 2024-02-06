@@ -76,7 +76,7 @@ sub setup_logger {
         }
     } else {
         # Setup default logging configuration if no log4perl configuration is specified
-        my $loglevel = $clargs->loglevel || 'WARN';  # Default log level
+        my $loglevel = $clargs->loglevel || 'WARN';  # Default log level      
         my $conf = qq(
             log4perl.rootLogger                                 = $loglevel, Screen
             log4perl.appender.Screen                            = Log::Log4perl::Appender::Screen
@@ -199,7 +199,6 @@ sub setupArgParse {
         '--loglevel',
         choices => [qw(TRACE DEBUG INFO WARN ERROR FATAL)],
         dest    => 'loglevel',
-        default => 'INFO',
         help    => 'The log level to use',
     );
 

@@ -1,6 +1,6 @@
 # FILEPATH: Untitled-1
 
-package Net::IPBlocker::GrepRegexpsMail;
+package Net::IPBlocker::GrepRegexpsSSHD;
 
 use strict;
 use warnings;
@@ -21,13 +21,24 @@ my $REGEX_IPV6      = q/\b($IPv6_re)\b/;
 
 =head1 NAME
 
-Net::IPBlocker::GrepRegexpsDefault - Default regular expressions for IP blocking
+Net::IPBlocker::GrepRegexpsDefault - Default regular expressions for IP blocking for sshd logs (auth.log)
 
 =head1 SYNOPSIS
 
-This works with the Net::IPBlocker module to provide a framework for getting bad IPs from a mail log file.
+This works with the Net::IPBlocker module to provide a framework for getting bad IPs from a ssh log file.
 
 The calling code will always pass in the log object and the log contents.
+
+The sshd log has two special items.  We don't want to add IPs to be blocked with special user names.  
+Also, the sshd log is usually an auth log so we filter out lines that don't have sshd in them.
+Both of these may be set in the configs file like this (as an example):
+
+ logs_to_review[authlog][filterin][01] = "sshd"
+ logs_to_review[authlog][filterin][02] = "openssh"
+ logs_to_review[authlog][filterout][01] = "sshd.*for johnboy"
+ logs_to_review[authlog][filterout][02] = "sshd.*Accepted.*for trinity"
+ logs_to_review[authlog][filterout][03] = "sshd.*Accepted.*for neo"
+
 
 =head1 DESCRIPTION
 
@@ -61,6 +72,23 @@ sub grep_regexps {
     $logger->debug("$TID|Dumper of log contents: " . Dumper(\@log_contents));
 
     return {} if ( !@log_contents );
+
+    $logger->info("$TID|Started with " . scalar(@log_contents) . " lines to review ");
+    foreach my $filterin ( sort keys %{ $log->{filterin} } ) {
+        my $pattern = $log->{filterin}{$filterin};
+        $logger->debug("$TID|Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
+
+        @log_contents = grep { /$pattern/ } @log_contents;
+    } ## end foreach my $filterin ( sort...)    
+    $logger->info("$TID|After filtering in, we have " . scalar(@log_contents) . " lines to review ");
+
+    foreach my $filterout ( sort keys %{ $log->{filterout} } ) {
+        my $pattern = $log->{filterout}{$filterout};
+        $logger->debug("$TID|Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
+
+        @log_contents = grep { !/$pattern/ } @log_contents;
+    } ## end foreach my $filterout ( sort...)
+    $logger->info("$TID|After filtering out, we have " . scalar(@log_contents) . " lines to review ");
 
     # DO NOT SORT NUMERICALLY!  The info in the configs states the order is sorted alphabetically
     foreach my $regex ( sort keys %{ $log->{regexpdeny} } ) {

@@ -534,9 +534,13 @@ sub iptables_thread() {
             $logger->info("$TID|Queue length of IptablesQueue is $iptablesQueue_pending");
             my $data = $IptablesQueue->dequeue();
             $logger->debug( "$TID|Dequeued from IptablesQueue: " . Dumper($data) ) if $logger->is_debug();
+            my $now = time();
             $self->run_iptables($data) || $logger->error( "Not successful running iptables command: " . Dumper($data) );
             $IPTABLESRUNLINE = __LINE__;               # See commentary way above about this variable
             $IPTABLESRUNLINE = $IPTABLESRUNLINE - 1;
+            my $elapsed = time() - $now;
+            $elapsed = sprintf( "%.4f", $elapsed );
+            $logger->debug("$TID|Iptables command took $elapsed second(s) to run");
         } ## end if ( $iptablesQueue_pending...)
         elsif ( $iptablesQueue_pending == 0 ) {
             # This is a bit of extra logging but if we are at this point, speed is not an issue
@@ -689,7 +693,7 @@ sub get_grepmodule {
     lib->import($logobj->{libpath}) if ( $logobj->{libpath} );
     my $grepmodule = $logobj->{grepmodule} || 'Net::IPBlocker::GrepRegexpsDefault';
 
-    $logger->info("$TID|Trying to require $grepmodule");
+    $logger->debug("$TID|Trying to require $grepmodule");
     if ( $grepmodule =~ m/::/ ) {
         eval "require $grepmodule";
     } else {
@@ -707,7 +711,7 @@ sub get_grepmodule {
     return $grepmodule;
 }
 
-# Description:  Reads the log file and adds IPs to the iptables queue
+# Description:  Reads the log file and adds IPs to the iptables queue 
 #               This is called as a thread and runs a loop to check the log file for new entries
 #               Prior to checking the log file, it creates a chain for the log file and adds it to the global chain
 # Future:       This entire sub needs to be refactored.
@@ -731,7 +735,7 @@ sub review_log() {
 
     $logobj ||= {};
     my $chain = $self->{configs}->{chainprefix} . $logobj->{chain};
-    $logger->info("$TID|Starting review of $logobj->{file} with chain $chain");
+    $logger->debug("$TID|Starting review of $logobj->{file} with chain $chain");
     $logger->debug( "$TID|Reviewing log object: " . Dumper($logobj) ) if ( $logger->is_debug() );
 
     # set file log values if exist, otherwise set to global values if exist else set to default values
@@ -745,7 +749,7 @@ sub review_log() {
     );
 
     # Create the chain for the log file
-    $logger->info("$TID|Trying to create >>$chain<< chain");
+    $logger->info("$TID|Adding >>$chain<< chain to iptables (if it doesn't exist)");
     $self->add_chain($chain);
 
     # Add rule for chain onto global chain
@@ -768,7 +772,7 @@ sub review_log() {
         $logger->debug("$TID|Log object: " . Dumper($logobj)) if ( $logger->is_debug() );
         $logobj->{ips_to_block} = $grepmodule->grep_regexps($logobj) if ( $logobj->{logcontents} );
 
-        $logger->debug( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
+        $logger->info( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
           if ( $logger->is_debug() );
 
         my @rules;
@@ -778,12 +782,12 @@ sub review_log() {
                 my $direction_switch = $direction eq 'destination' ? '-d' : '-s';
                 my $randval          = int( rand(2) );
                 $direction_switch = int( rand(2) ) ? '-d' : '-s' if ( $direction eq 'random' );
-                $logger->info("$TID|randval: $randval.  direction: $direction.  direction_switch: $direction_switch");
+                $logger->trace("$TID|randval: $randval.  direction: $direction.  direction_switch: $direction_switch");
                 my $base_rule = "$direction_switch $ip";
                 $logger->debug("$TID|Base rule: $base_rule");
 
                 if ( ! @protocols ) {
-                    $logger->debug("$TID|Pushing rule: $base_rule");
+                    $logger->info("$TID|Pushing rule: $base_rule");
                     push @rules, "$base_rule -j DROP";
                     next;
                 }
@@ -795,7 +799,7 @@ sub review_log() {
                         # -m multiport --dports 80,443 -j DROP
                         $rule .= " -m multiport -$direction_switch" . "port $logobj->{ports}";
                     } ## end if ( $logobj->{ports} )
-                    $logger->debug("$TID|Pushing rule: $rule");
+                    $logger->info("$TID|Pushing rule: $rule");
                     push @rules, "$rule -j DROP";
                 } ## end foreach my $protocol (@protocols)
             } ## end foreach my $direction (@directions)
@@ -1044,8 +1048,7 @@ sub run_iptables() {
             return 1;
         } ## end if ( $retval =~ /in tracker/)
         if ( $retval eq "rule exists" ) {
-
-            #Since the rule exists and we are not allowing dupes, then we do not need to add the rule and
+            # Since the rule exists and we are not allowing dupes, then we do not need to add the rule and
             # we return success
             $logger->debug("$TID|Rule exists.  Not adding rule: $iptables $options $rule");
             # But we do track it so that we can remove it on exit AND so that we can check if it exists later
@@ -1055,8 +1058,7 @@ sub run_iptables() {
         elsif ( $retval eq "DNE" ) {
             $logger->debug("$TID|Rule does not exist.  Adding rule: $iptables $options $rule");
         }
-        elsif (( $retval eq "create chain" )
-            && ( $options =~ m/-N/ ) )
+        elsif (( $retval eq "create chain" ) && ( $options =~ m/-N/ ) )
         {
             # Creating chains is a special case.  We just allow it to happen.
             $logger->debug("$TID|Trying to create chain: $iptables $options $rule");
@@ -1120,7 +1122,7 @@ sub check_if_rule_exists {
     $TID = "TID: " . $TID;
 
     # Preliminary checks
-    $args->{rule}                or return $self->log_and_return("$TID|No rule passed to check_if_rule_exists");
+    $args->{rule}                or return $self->error("$TID|No rule passed to check_if_rule_exists");
     $self->{configs}->{iptables} or $logger->error("$TID|No iptables command set, this may cause problems");
 
     my $iptables = $self->{configs}->{iptables};
@@ -1168,18 +1170,8 @@ sub check_if_rule_exists {
         return "permission denied";
     }
 
-    $self->log_and_return("$TID|Should not get here but by default returning 0. Output of iptables: $checkrule_result");
+    $self->error("$TID|Should not get here but by default returning 0. Output of iptables: $checkrule_result");
 } ## end sub check_if_rule_exists
-
-# Description:  A stupid helper function to log and return a message
-# Returns:      1 always
-sub log_and_return {
-    my ( $self, $error_message ) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
-    $logger->error($error_message);
-    return 1;
-} ## end sub log_and_return
 
 # Description:  Creates the global chain and then adds jump rule(s) to the global chain.
 #               With default values this means creating the global chain "IPBLOCKER_global" and then
@@ -1341,7 +1333,7 @@ sub add_chain() {
     my ( $self, $chain ) = @_;
     my $TID = "TID: " . threads->tid;
 
-    $logger->info("$TID|Trying to add chain $chain");
+    $logger->debug("$TID|Trying to add chain $chain");
     my $rule    = "$chain";
     my $options = "-w -N";
     my $args    = { rule => $rule, options => $options };
