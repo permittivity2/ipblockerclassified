@@ -95,6 +95,15 @@ sub grep_regexps {
 sub gdr() {
 }
 
+sub test() {
+    my $self = shift;
+    my $TID = "TID: " . threads->tid;
+    print "$TID|In test in " . __PACKAGE__ . " module.\n";
+    $logger->debug("$TID|In test in " . __PACKAGE__ . " module.");
+    $logger->debug("$TID|Dumper of self: " . Dumper($self));
+    return 1;
+}
+
 1;
 
 =head1 AUTHOR

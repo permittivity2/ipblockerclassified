@@ -1,6 +1,6 @@
 # FILEPATH: Untitled-1
 
-package Net::IPBlocker::GrepRegexpsSSHD;
+package Net::IPBlocker::ReviewLogDefault;
 
 use strict;
 use warnings;
@@ -21,24 +21,15 @@ my $REGEX_IPV6      = q/\b($IPv6_re)\b/;
 
 =head1 NAME
 
-Net::IPBlocker::GrepRegexpsDefault - Default regular expressions for IP blocking for sshd logs (auth.log)
+Net::IPBlocker::GrepRegexpsDefault - Default regular expressions for IP blocking
 
 =head1 SYNOPSIS
 
-This works with the Net::IPBlocker module to provide a framework for getting bad IPs from a ssh log file.
+    This works with the Net::IPBlocker module to provide a default sub for regular expressions for IP blocking.
+    This is alos a framework that could be used to create other modules that provide default regular expressions for 
+    IP Blocking of particular types of files such as Apache logs, Postfix logs, Auth logs, etc.
 
-The calling code will always pass in the log object and the log contents.
-
-The sshd log has two special items.  We don't want to add IPs to be blocked with special user names.  
-Also, the sshd log is usually an auth log so we filter out lines that don't have sshd in them.
-Both of these may be set in the configs file like this (as an example):
-
- logs_to_review[authlog][filterin][01] = "sshd"
- logs_to_review[authlog][filterin][02] = "openssh"
- logs_to_review[authlog][filterout][01] = "sshd.*for johnboy"
- logs_to_review[authlog][filterout][02] = "sshd.*Accepted.*for trinity"
- logs_to_review[authlog][filterout][03] = "sshd.*Accepted.*for neo"
-
+    The calling code will always pass in the log object and the log contents.
 
 =head1 DESCRIPTION
 
@@ -64,31 +55,10 @@ sub grep_regexps {
     my $TID = "TID: " . threads->tid;
     $logger->debug("$TID|In grep_regexps in " . __PACKAGE__ . " module.");
 
-    $logger->debug("$TID|Dumper of log object: " . Dumper($log));
-
     my $matches      = {};
     my @log_contents = @{ $log->{logcontents} };
 
-    $logger->debug("$TID|Dumper of log contents: " . Dumper(\@log_contents));
-
     return {} if ( !@log_contents );
-
-    $logger->info("$TID|Started with " . scalar(@log_contents) . " lines to review ");
-    foreach my $filterin ( sort keys %{ $log->{filterin} } ) {
-        my $pattern = $log->{filterin}{$filterin};
-        $logger->debug("$TID|Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
-
-        @log_contents = grep { /$pattern/ } @log_contents;
-    } ## end foreach my $filterin ( sort...)    
-    $logger->info("$TID|After filtering in, we have " . scalar(@log_contents) . " lines to review ");
-
-    foreach my $filterout ( sort keys %{ $log->{filterout} } ) {
-        my $pattern = $log->{filterout}{$filterout};
-        $logger->debug("$TID|Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
-
-        @log_contents = grep { !/$pattern/ } @log_contents;
-    } ## end foreach my $filterout ( sort...)
-    $logger->info("$TID|After filtering out, we have " . scalar(@log_contents) . " lines to review ");
 
     # DO NOT SORT NUMERICALLY!  The info in the configs states the order is sorted alphabetically
     foreach my $regex ( sort keys %{ $log->{regexpdeny} } ) {
@@ -113,14 +83,57 @@ sub grep_regexps {
 
     my $log_msg = "$TID|Matched IP addresses to be reviewed for potential blocking: ";
     $log_msg .= join( ",", keys %{$matches} );
-    $logger->debug($log_msg . "\n");
+    $logger->info($log_msg);
 
     return $matches;
 } ## end sub grep_regexps
 
-# Description: This is the gosh darn retaliatory strike and attack method.  It will strike the malicious IP addresses
-#              with a malformed tcp packet to the port that the malicious IP address was attacking.
-sub gdr() {
+=head2 test
+
+This is just a simple test sub.  It is not required but is nice to have for testing.
+
+This sub is called after the module is successfully loaded as a sanity check.
+
+You can put whatever you want into it but returning 1 (Perl truthy) will keep a warning from happening
+
+=cut
+
+# Description:  Just a test sub for a sanity check.  Not really required but nice to have for testing
+#               My lessons learned:
+#               1.  Make sure the last part of the package name actually matches the file name (without the pm)
+# Returns:      1
+sub test() {
+    my ($self) = @_;
+    my $TID = "TID: " . threads->tid;
+    $logger->info("$TID:Test sub successfull.  Dump of self: " . Dumper($self));
+    return 1;
+}
+
+=head2 new
+
+This is the constructor for the module.  It is not required but is nice to have.
+
+This sub is called after the module is successfully loaded as a sanity check.
+
+=cut
+
+# Description:  Constructor for the module
+# Returns:      blessed reference
+sub new() {
+    my $class = shift;
+    my $args  = shift;
+    my $TID = "TID: " . threads->tid;
+    my $self = {
+        parentobjself => $args->{parentobjself},
+        logobj        => $args->{logobj},
+    };
+
+    $logger->info("$TID|In new in " . __PACKAGE__ . " module");
+    $logger->debug("$TID|Dumper of self: " . Dumper($self)) if $logger->is_debug();
+    bless $self, $class;
+
+    $logger->info("$TID|Blessed reference: " . Dumper($self));
+    return $self;
 }
 
 1;

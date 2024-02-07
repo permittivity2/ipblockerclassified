@@ -711,6 +711,51 @@ sub get_grepmodule {
     return $grepmodule;
 }
 
+
+# Description:  Gets the log review module or sets to the default
+#               The log review module is the module that actually reads the log file and determisn what to do with IPs
+#               It can do other things as well.  The LogReviewDefault module is the default module.
+#               We do not use "use" because we don't want this to load at compile.  So, we use "require" instead.
+# Requires:     $self, $logobj
+# Returns:      $module
+sub get_reviewlog_module {
+    my ($self, $logobj) = @_;
+    my $TID = "TID: " . threads->tid;
+    if ( $logobj->{libpath} ) {
+        $logger->debug("$TID|Importing libpath: $logobj->{libpath}");
+        lib->import($logobj->{libpath});
+    }
+    my $module = $logobj->{module} || 'Net::IPBlocker::ReviewLogDefault';
+
+    $logger->debug("$TID|Trying to require $module");
+    if ( $module =~ m/::/ ) {
+        $logger->debug("$TID|Module has :: in it.  Trying to require $module");
+        eval "require $module";
+    } else {
+        $logger->debug("$TID|Module does not have :: in it.  Trying to require $module");
+        eval require $module;
+    }
+
+    if ($@) {
+        $logger->error("$TID|Unable to require $module: $@");
+        return 0;
+    }
+    $logger->info("$TID|Successfully required $module");
+
+    if ( $module->can('new') ) {
+        my $newargs = {
+            logobj => $logobj,
+            parentobjself => $self,
+        };
+        $module = $module->new($newargs);
+        $logger->debug("$TID|Module >>$module<< has a sub called new.");
+    } else {
+        $logger->error("$TID|Module >>$module<< does not have a new sub.  This is not required but is encouraged.");
+    }
+
+    return $module
+}
+
 # Description:  Reads the log file and adds IPs to the iptables queue 
 #               This is called as a thread and runs a loop to check the log file for new entries
 #               Prior to checking the log file, it creates a chain for the log file and adds it to the global chain
@@ -727,9 +772,17 @@ sub review_log() {
     my $start_time = time();
 
     # Get the right sub for grepping regexps for the log
-    my $grepmodule = $self->get_grepmodule($logobj);
-    if ( !$grepmodule ) {
-        $logger->error("$TID|Unable to get grepmodule.  Exiting thread for $logobj->{file}.");
+    # my $grepmodule = $self->get_grepmodule($logobj);
+    # if ( !$grepmodule ) {
+    #     $logger->error("$TID|Unable to get grepmodule.  Exiting thread for $logobj->{file}.");
+    #     return 0;
+    # }
+
+    # Get the right sub for reviewing the log
+    my $reviewlogmodule = $self->get_reviewlog_module($logobj);
+    $reviewlogmodule->test() || $logger->warn("$TID|Module $reviewlogmodule test sub failed.  This is not a show stopper but it is a warning.");
+    if ( !$reviewlogmodule ) {
+        $logger->error("$TID|Unable to get reviewlogmodule.  Exiting thread for $logobj->{file}.");
         return 0;
     }
 
@@ -770,7 +823,10 @@ sub review_log() {
         $logobj = $self->readlogfile($logobj);
         # $logobj->{ips_to_block} = $self->grep_regexps($logobj) if ( $logobj->{logcontents} );
         $logger->debug("$TID|Log object: " . Dumper($logobj)) if ( $logger->is_debug() );
-        $logobj->{ips_to_block} = $grepmodule->grep_regexps($logobj) if ( $logobj->{logcontents} );
+        if ( $logobj->{logcontents} ) {
+            $logger->info("$TID|Calling grep_regexps()");
+            $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj);
+        }
 
         $logger->info( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
           if ( $logger->is_debug() );

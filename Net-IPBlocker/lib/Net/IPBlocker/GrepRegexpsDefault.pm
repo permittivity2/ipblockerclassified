@@ -85,6 +85,12 @@ sub grep_regexps {
     return $matches;
 } ## end sub grep_regexps
 
+sub test() {
+    print "Test\n";
+    $logger->info("Test");
+    return 1;
+}
+
 1;
 
 =head1 AUTHOR
