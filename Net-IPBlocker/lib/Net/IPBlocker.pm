@@ -687,29 +687,29 @@ sub prepare_directions() {
     return @directions;
 } ## end sub prepare_directions
 
-sub get_grepmodule {
-    my ($self, $logobj) = @_;
-    my $TID = "TID: " . threads->tid;
-    lib->import($logobj->{libpath}) if ( $logobj->{libpath} );
-    my $grepmodule = $logobj->{grepmodule} || 'Net::IPBlocker::GrepRegexpsDefault';
+# sub get_grepmodule {
+#     my ($self, $logobj) = @_;
+#     my $TID = "TID: " . threads->tid;
+#     lib->import($logobj->{libpath}) if ( $logobj->{libpath} );
+#     my $grepmodule = $logobj->{grepmodule} || 'Net::IPBlocker::GrepRegexpsDefault';
 
-    $logger->debug("$TID|Trying to require $grepmodule");
-    if ( $grepmodule =~ m/::/ ) {
-        eval "require $grepmodule";
-    } else {
-        eval require $grepmodule;
-    }
-    # eval require $grepmodule; # This works for both module names and paths
+#     $logger->debug("$TID|Trying to require $grepmodule");
+#     if ( $grepmodule =~ m/::/ ) {
+#         eval "require $grepmodule";
+#     } else {
+#         eval require $grepmodule;
+#     }
+#     # eval require $grepmodule; # This works for both module names and paths
 
-    if ($@) {
-        $logger->error("$TID|Unable to require $grepmodule: $@");
-        return 0;
-    } else {
-        $logger->info("$TID|Successfully required $grepmodule");
-    }
+#     if ($@) {
+#         $logger->error("$TID|Unable to require $grepmodule: $@");
+#         return 0;
+#     } else {
+#         $logger->info("$TID|Successfully required $grepmodule");
+#     }
 
-    return $grepmodule;
-}
+#     return $grepmodule;
+# }
 
 
 # Description:  Gets the log review module or sets to the default
@@ -746,6 +746,7 @@ sub get_reviewlog_module {
         my $newargs = {
             logobj => $logobj,
             parentobjself => $self,
+            iptablesqueue_enqueue => \&iptablesqueue_enqueue,
         };
         $module = $module->new($newargs);
         $logger->debug("$TID|Module >>$module<< has a sub called new.");
@@ -771,16 +772,8 @@ sub review_log() {
     $TID = "TID: " . $TID;
     my $start_time = time();
 
-    # Get the right sub for grepping regexps for the log
-    # my $grepmodule = $self->get_grepmodule($logobj);
-    # if ( !$grepmodule ) {
-    #     $logger->error("$TID|Unable to get grepmodule.  Exiting thread for $logobj->{file}.");
-    #     return 0;
-    # }
-
     # Get the right sub for reviewing the log
     my $reviewlogmodule = $self->get_reviewlog_module($logobj);
-    $reviewlogmodule->test() || $logger->warn("$TID|Module $reviewlogmodule test sub failed.  This is not a show stopper but it is a warning.");
     if ( !$reviewlogmodule ) {
         $logger->error("$TID|Unable to get reviewlogmodule.  Exiting thread for $logobj->{file}.");
         return 0;
@@ -821,14 +814,13 @@ sub review_log() {
         my $start_loop_time = time();
         $logger->info("$TID|$cyclesleft cycles remaining for $logobj->{file}.");
         $logobj = $self->readlogfile($logobj);
-        # $logobj->{ips_to_block} = $self->grep_regexps($logobj) if ( $logobj->{logcontents} );
         $logger->debug("$TID|Log object: " . Dumper($logobj)) if ( $logger->is_debug() );
         if ( $logobj->{logcontents} ) {
-            $logger->info("$TID|Calling grep_regexps()");
+            $logger->debug("$TID|Calling grep_regexps()");
             $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj);
         }
 
-        $logger->info( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
+        $logger->debug( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
           if ( $logger->is_debug() );
 
         my @rules;
@@ -864,6 +856,7 @@ sub review_log() {
         $logger->debug( "$TID|Potential rules to be added to iptablesqueue: " . Dumper( \@rules ) )
           if ( $logger->is_debug() );
         my $eject;
+        my @rules_enqueued;
         foreach my $rule (@rules) {
             if ( $tracker->{iptables_rules}->{"$chain $rule"} ) {
                 $logger->debug("$TID|Rule already exists in tracker: $chain $rule");
@@ -877,6 +870,7 @@ sub review_log() {
             $tracker->{iptables_rules}->{"$chain $rule"}++;
 
             # Stop processing if iptablesqueue_enqueue() returns falsy
+            push @{$logobj->{enqueued_rules}}, $args;
             $self->iptablesqueue_enqueue($args) || $eject++ && last;
         } ## end foreach my $rule (@rules)
 
@@ -888,6 +882,12 @@ sub review_log() {
         # Check if iptables queue is still accepting commands.
         #  If not, then exit the loop
         $self->iptablesqueue_enqueue( { check_pending => 1 } ) || last;
+
+        # $logobj->{enqueued_rules} = \@rules_enqueued;
+
+        if ( $reviewlogmodule->can('post_enqueue') ) {
+            $reviewlogmodule->post_enqueue($logobj);
+        }
 
         my $timediff = time() - $start_loop_time;
         $timediff = sprintf( "%.4f", $timediff );
@@ -1279,7 +1279,7 @@ sub iptablesqueue_enqueue() {
         $logger->info($logmsg);
         return 0;
     } ## end if ( !defined $iptablesQueue_pending)
-    return 1                                                                     if ( $args->{check_pending} );
+    return 1 if ( $args->{check_pending} );
     $logger->debug( "$TID|Enqueuing onto the iptables queue: " . Dumper($args) ) if ( $logger->is_debug() );
     $IptablesQueue->enqueue($args);
     return 1;
@@ -1589,13 +1589,14 @@ sub clear_queues() {
     $TID = "TID: " . $TID;
     $logger->debug("$TID|Clearing queues");
     $IptablesQueue->end();
-    while ( $IptablesQueue->pending() ) {
-        $IptablesQueue->pending() && $logger->debug("Data still in IptablesQueue");
+    my $counter = 6;
+    while ( $IptablesQueue->pending() && $counter-- ) {
+        $IptablesQueue->pending() && $logger->debug("Data still in IptablesQueue (Trying $counter more times)");
         sleep 1;
     }
-
     if ( $IptablesQueue->pending() ) {
         $logger->error("$TID|Data still in queue.  This may be an issue.");
+        $logger->error("$TID|Data still in queue: " . Dumper( $IptablesQueue) );
         return 0;
     }
     else {

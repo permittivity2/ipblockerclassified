@@ -51,6 +51,8 @@ sub grep_regexps {
     my ( $self, $log ) = @_;
     my $TID = "TID: " . threads->tid;
     $logger->debug("$TID|In grep_regexps in " . __PACKAGE__ . " module.");
+    $logger->debug("$TID|Dumper of self: " . Dumper($self)) if $logger->is_debug();
+die;
 
     my $matches      = {};
     my @log_contents = @{ $log->{logcontents} };

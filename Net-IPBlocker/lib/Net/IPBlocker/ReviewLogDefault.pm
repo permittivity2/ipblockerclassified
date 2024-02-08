@@ -13,11 +13,14 @@ use Data::Dumper;
 local $Data::Dumper::Sortkeys = 1;
 local $Data::Dumper::Indent   = 1;
 
+
 our @EXPORT_OK = qw(grep_regexps);
 
+# "Global" variables
 my $logger = $log;
 my $REGEX_IPV4 = q/\b((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))\b/;
 my $REGEX_IPV6      = q/\b($IPv6_re)\b/;
+my $tracker = {};
 
 =head1 NAME
 
@@ -37,6 +40,36 @@ This module provides a default regular expression sub for IP blocking.
 These regular expressions can be used with the L<Net::IPBlocker> module to match and block IP addresses.
 
 =head1 METHODS
+
+=head2 new
+
+This is the constructor for the module.  It is not required but is nice to have.
+
+This sub is called after the module is successfully loaded as a sanity check.
+
+=cut
+
+# Description:  Constructor for the module
+# Returns:      blessed reference
+sub new() {
+    my $class = shift;
+    my $args  = shift;
+    my $TID = "TID: " . threads->tid;
+    my $self = {
+        parentobjself => $args->{parentobjself},
+        logobj        => $args->{logobj},
+        configs       => $args->{parentobjself}->{configs},
+    };
+
+    $logger->info("$TID|In new in " . __PACKAGE__ . " module");
+    $logger->debug("$TID|Dumper of self: " . Dumper($self)) if $logger->is_debug();
+
+    # Set the enqueue alias
+    *iptablesqueue_enqueue = $args->{iptablesqueue_enqueue};
+
+    bless $self, $class;
+    return $self;
+} ## end sub new
 
 =head2 get_regexps
 
@@ -88,52 +121,16 @@ sub grep_regexps {
     return $matches;
 } ## end sub grep_regexps
 
-=head2 test
-
-This is just a simple test sub.  It is not required but is nice to have for testing.
-
-This sub is called after the module is successfully loaded as a sanity check.
-
-You can put whatever you want into it but returning 1 (Perl truthy) will keep a warning from happening
-
-=cut
-
-# Description:  Just a test sub for a sanity check.  Not really required but nice to have for testing
-#               My lessons learned:
-#               1.  Make sure the last part of the package name actually matches the file name (without the pm)
-# Returns:      1
-sub test() {
-    my ($self) = @_;
+# Description:  A sub ran after the IPs have been enqueue'd for blocking
+# Assumes:      $logobj has set $logobj->{enqueued} to rules that have been enqueued
+# Requires:     $self, $logobj
+sub post_enqueue {
+    my ( $self, $logobj ) = @_;
     my $TID = "TID: " . threads->tid;
-    $logger->info("$TID:Test sub successfull.  Dump of self: " . Dumper($self));
+    $logger->debug("$TID|In post_enqueue in " . __PACKAGE__ . " module.");
+
+    $logger->debug("$TID|Dumper of logobj: " . Dumper($logobj)) if $logger->is_debug();
     return 1;
-}
-
-=head2 new
-
-This is the constructor for the module.  It is not required but is nice to have.
-
-This sub is called after the module is successfully loaded as a sanity check.
-
-=cut
-
-# Description:  Constructor for the module
-# Returns:      blessed reference
-sub new() {
-    my $class = shift;
-    my $args  = shift;
-    my $TID = "TID: " . threads->tid;
-    my $self = {
-        parentobjself => $args->{parentobjself},
-        logobj        => $args->{logobj},
-    };
-
-    $logger->info("$TID|In new in " . __PACKAGE__ . " module");
-    $logger->debug("$TID|Dumper of self: " . Dumper($self)) if $logger->is_debug();
-    bless $self, $class;
-
-    $logger->info("$TID|Blessed reference: " . Dumper($self));
-    return $self;
 }
 
 1;
