@@ -9,6 +9,7 @@ use Regexp::IPv6     qw($IPv6_re);
 use Log::Any qw($log);  # Allegedly handles lots of different logging modules
 use threads;
 use Data::Dumper;
+use POSIX qw(LONG_MAX);
 
 local $Data::Dumper::Sortkeys = 1;
 local $Data::Dumper::Indent   = 1;
@@ -67,7 +68,7 @@ sub new() {
     # Set the enqueue alias
     *iptablesqueue_enqueue = $args->{iptablesqueue_enqueue};
 
-    bless $self, $class;
+    bless $self, $class;  
     return $self;
 } ## end sub new
 
@@ -91,7 +92,7 @@ sub grep_regexps {
     my $matches      = {};
     my @log_contents = @{ $log->{logcontents} };
 
-    return {} if ( !@log_contents );
+    return $matches if ( !@log_contents );
 
     # DO NOT SORT NUMERICALLY!  The info in the configs states the order is sorted alphabetically
     foreach my $regex ( sort keys %{ $log->{regexpdeny} } ) {
@@ -106,8 +107,10 @@ sub grep_regexps {
             $logger->debug("$TID|Checking >>$line<< for IP address");
 
             foreach my $ip_address ( $line =~ /$REGEX_IPV4/g, $line =~ /$REGEX_IPV6/g ) {
-                $matches->{$ip_address}++;
-                $logger->debug("$TID|Found IP address: $ip_address");
+                # $matches->{$ip_address};
+                $matches->{$ip_address}->{count}++;
+                $matches->{$ip_address}->{logline} = $line;
+                $logger->debug("$TID|Found IP address: $ip_address in log line: $line");
             }
         } ## end foreach my $line (@current_matches)
     } ## end foreach my $regex ( sort keys...)
@@ -122,14 +125,41 @@ sub grep_regexps {
 } ## end sub grep_regexps
 
 # Description:  A sub ran after the IPs have been enqueue'd for blocking
+#               By default, this sub will track the IPs that have been enqueued and then after 30 minutes will delete the rule from iptables
+#               Actually, it passes a delete rule to the iptablesqueue_enqueue sub
 # Assumes:      $logobj has set $logobj->{enqueued} to rules that have been enqueued
 # Requires:     $self, $logobj
 sub post_enqueue {
     my ( $self, $logobj ) = @_;
     my $TID = "TID: " . threads->tid;
+    my $jailtime = $logobj->{jailtime} || $self->{configs}->{jailtime} || 1800;
     $logger->debug("$TID|In post_enqueue in " . __PACKAGE__ . " module.");
 
     $logger->debug("$TID|Dumper of logobj: " . Dumper($logobj)) if $logger->is_debug();
+
+    $logger->debug("$TID|Dumper of self: " . Dumper($self)) if $logger->is_debug();
+
+    my $epoch = time();
+    foreach ( @{ $logobj->{enqueued_rules} } ) {
+        my $rule = $_->{rule};
+        push @{$tracker->{jailed}->{$epoch}}, $rule;
+    }
+
+    $logger->debug("$TID|Dumper of tracker: " . Dumper($tracker));
+
+    foreach my $jailedtime ( keys %{$tracker->{jailedtime}} ) {
+        $logger->debug("$TID|Checking jailedtime: $jailedtime");
+        if ( $jailedtime + $jailtime < $epoch ) {
+            foreach my $rule ( @{$tracker->{jailed}->{$jailedtime}} ) {
+                my $args = { options => "-w -D", rule => $rule }; 
+                $self->iptablesqueue_enqueue($args);
+                $logger->info("$TID|Deleted rule from iptables: $rule");
+            }
+            delete $tracker->{jailed}->{jailedtime};
+            $logger->info("$TID|Deleted jailedtime $jailedtime from tracker");
+        }
+    
+    }
     return 1;
 }
 

@@ -551,7 +551,7 @@ sub iptables_thread() {
             usleep $cyclesleep * 1000000;
             $cyclesleft--;
             if ( $cyclesleft <= 0 ) {
-                $logger->info("$TID|IptablesQueue thread has reached the end of its cycles. Setting queue to end.");
+                $logger->info("$TID|IptablesQueue thread has completed $cycles cycle(s). Setting queue to end.");
                 $IptablesQueue->end();
             } ## end if ( $cyclesleft <= 0)            
         } ## end elsif ( $iptablesQueue_pending...)
@@ -773,16 +773,10 @@ sub review_log() {
     my $start_time = time();
 
     # Get the right sub for reviewing the log
-    my $reviewlogmodule = $self->get_reviewlog_module($logobj);
-    if ( !$reviewlogmodule ) {
-        $logger->error("$TID|Unable to get reviewlogmodule.  Exiting thread for $logobj->{file}.");
-        return 0;
-    }
+    my $reviewlogmodule = $self->get_reviewlog_module($logobj) or return 0;
 
     $logobj ||= {};
     my $chain = $self->{configs}->{chainprefix} . $logobj->{chain};
-    $logger->debug("$TID|Starting review of $logobj->{file} with chain $chain");
-    $logger->debug( "$TID|Reviewing log object: " . Dumper($logobj) ) if ( $logger->is_debug() );
 
     # set file log values if exist, otherwise set to global values if exist else set to default values
     my $cycles          = $logobj->{cycles}     ||= LONG_MAX;
@@ -790,17 +784,10 @@ sub review_log() {
     my $cyclesleep      = $logobj->{cyclesleep} ||= 0.5;
     my $microcyclesleep = $cyclesleep * 1000000;
 
-    $logger->info(
-        "$TID|Reviewing $logobj->{file} for $logobj->{cycles} cycles with $logobj->{cyclesleep} seconds between cycles"
-    );
-
-    # Create the chain for the log file
-    $logger->info("$TID|Adding >>$chain<< chain to iptables (if it doesn't exist)");
     $self->add_chain($chain);
 
     # Add rule for chain onto global chain
     my $globalchain = $self->{configs}->{globalchain};
-    $logger->debug("$TID|Adding rule to iptablesqueue: -A $globalchain -j $chain");
     $self->iptablesqueue_enqueue( { options => "-A", rule => "$globalchain -j $chain" } ) || return 0; 
 
     $self->add_logger_allow_deny_ips($logobj);
@@ -814,83 +801,46 @@ sub review_log() {
         my $start_loop_time = time();
         $logger->info("$TID|$cyclesleft cycles remaining for $logobj->{file}.");
         $logobj = $self->readlogfile($logobj);
-        $logger->debug("$TID|Log object: " . Dumper($logobj)) if ( $logger->is_debug() );
-        if ( $logobj->{logcontents} ) {
-            $logger->debug("$TID|Calling grep_regexps()");
-            $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj);
-        }
-
-        $logger->debug( "$TID|IPs to potentially be blocked: " . Dumper( $logobj->{ips_to_block} ) )
-          if ( $logger->is_debug() );
+        $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj) || {};
 
         my @rules;
         foreach my $ip ( keys %{ $logobj->{ips_to_block} } ) {
-            $logger->debug("$TID|IP to potentially block: $ip");
             foreach my $direction (@directions) {
                 my $direction_switch = $direction eq 'destination' ? '-d' : '-s';
-                my $randval          = int( rand(2) );
                 $direction_switch = int( rand(2) ) ? '-d' : '-s' if ( $direction eq 'random' );
-                $logger->trace("$TID|randval: $randval.  direction: $direction.  direction_switch: $direction_switch");
                 my $base_rule = "$direction_switch $ip";
-                $logger->debug("$TID|Base rule: $base_rule");
 
-                if ( ! @protocols ) {
-                    $logger->info("$TID|Pushing rule: $base_rule");
-                    push @rules, "$base_rule -j DROP";
-                    next;
-                }
+                scalar @protocols || push( @rules, "$base_rule -j DROP" ) && next;
                 foreach my $protocol (@protocols) {
                     my $rule = $base_rule . " -p $protocol";
-                    $logger->debug("$TID|Rule: $rule");
-                    if ( $logobj->{ports} ) {
-                        # As an example the following line looks something like:
-                        # -m multiport --dports 80,443 -j DROP
-                        $rule .= " -m multiport -$direction_switch" . "port $logobj->{ports}";
-                    } ## end if ( $logobj->{ports} )
-                    $logger->info("$TID|Pushing rule: $rule");
+                    $rule .= " -m multiport -$direction_switch" . "port $logobj->{ports}" if ( $logobj->{ports} );
                     push @rules, "$rule -j DROP";
                 } ## end foreach my $protocol (@protocols)
             } ## end foreach my $direction (@directions)
         } ## end foreach my $ip ( keys %{ $logobj...})
 
-        $logger->debug( "$TID|Potential rules to be added to iptablesqueue: " . Dumper( \@rules ) )
-          if ( $logger->is_debug() );
         my $eject;
-        my @rules_enqueued;
         foreach my $rule (@rules) {
-            if ( $tracker->{iptables_rules}->{"$chain $rule"} ) {
-                $logger->debug("$TID|Rule already exists in tracker: $chain $rule");
-                next;
-            }
+            $tracker->{iptables_rules}->{"$chain $rule"} && next;
             my $args = {
                 options => "-w -A",
                 rule    => "$chain $rule",
             };
-            $logger->debug("$TID|Adding rule to iptablesqueue: -A $chain $rule");
             $tracker->{iptables_rules}->{"$chain $rule"}++;
+            push @{$logobj->{enqueued_rules}}, $args;
 
             # Stop processing if iptablesqueue_enqueue() returns falsy
-            push @{$logobj->{enqueued_rules}}, $args;
             $self->iptablesqueue_enqueue($args) || $eject++ && last;
         } ## end foreach my $rule (@rules)
 
         my $logmsg = "$TID|Exiting while loop for $chain. iptablesqueue_enqueue() returned falsy";
         $eject && $logger->info($logmsg) && last;
-
-        $logobj->{ips_to_block} = {};    # Reset the ips_to_block hash
-
-        # Check if iptables queue is still accepting commands.
-        #  If not, then exit the loop
         $self->iptablesqueue_enqueue( { check_pending => 1 } ) || last;
 
-        # $logobj->{enqueued_rules} = \@rules_enqueued;
+        $reviewlogmodule->can('post_enqueue') && $reviewlogmodule->post_enqueue($logobj);
 
-        if ( $reviewlogmodule->can('post_enqueue') ) {
-            $reviewlogmodule->post_enqueue($logobj);
-        }
-
-        my $timediff = time() - $start_loop_time;
-        $timediff = sprintf( "%.4f", $timediff );
+        # my $timediff = time() - $start_loop_time;
+        my $timediff = sprintf( "%.4f", time() - $start_loop_time );
         $logger->info("$TID| Review of $chain took $timediff seconds");
 
         last unless --$cyclesleft;    # Break out of loop if $cyclesleft is 0
@@ -906,6 +856,27 @@ sub review_log() {
     $logger->info($logmsg);
     return 1;
 } ## end sub review_log 
+
+sub review_log_chatgpt {
+    my ($self, $logobj) = @_;
+    my $TID = "TID: " . threads->tid();
+    my $start_time = time;
+
+    my $reviewlogmodule = $self->_get_review_log_module($logobj) or return 0;
+    $logobj ||= {};
+    $self->_initialize_log_object($logobj, $TID);
+
+    my ($cycles, $cyclesleft, $microcyclesleep) = $self->_set_log_cycles($logobj);
+
+    $self->_setup_iptables_chain($logobj, $TID);
+
+    while ($cyclesleft > 0) {
+        $self->_process_log_cycle($logobj, \$cyclesleft, $microcyclesleep, $TID, $reviewlogmodule);
+    }
+
+    $self->_finalize_log_review($logobj, $start_time, $cycles, $cyclesleft, $TID);
+    return 1;
+}
 
 # Description:  Reads the log file (if one exists) from $self->{configsfile}
 #               If $args is passed to new(), then clargs (command line arguments) will override the configs file
