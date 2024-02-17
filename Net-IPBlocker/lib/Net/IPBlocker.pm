@@ -460,7 +460,7 @@ sub go() {
     $self->set_iptables_command() or $logger->error("Unable to set iptables command");
     $self->set_signal_handler();
     $self->{configs}->{globalchain} = $self->{configs}->{chainprefix} . "global";
-    $self->set_lockFile() or $logger->logdie("Unable to set lock file");
+    $self->set_lockFile() or $logger->fatal("Unable to set lock file") and return 0;
 
     # $self->add_ifconfig_ips_to_allowlist() if ( $self->{configs}->{ignoreinterfaceips} );  # Not yet implemented
 
@@ -474,7 +474,7 @@ sub go() {
     $self->add_global_allow_deny_ips();
 
     # Create a thread for each logger watcher
-    $logger->logdie("Unable to review logs") unless ( $self->logger_thread() );
+    $logger->fatal("Unable to review logs") and die "Unable to review logs" unless ( $self->logger_thread() );
 
     my $totalruntime = $self->{configs}->{totalruntime};
     my $timeleft     = $totalruntime;
@@ -601,12 +601,13 @@ sub add_ifconfig_ips_to_allowlist() {
 #               Some of this is on the user but I'll try my best to make it so duplicate instances of this script
 #               can't run.
 # Requires:     $self->{configs}->{lockfile}
-# Returns:      1 if able to set lock file, otherwise logdie happens
+# Returns:      1 if able to set lock file, otherwise die happens
 sub set_lockFile() {
     my $self = shift;
 
     if ( !$self->{configs}->{lockfile} ) {
-        $logger->logdie("No lock file provided.  Unable to continue");
+        $logger->fatal("No lock file provided.  Unable to continue");
+        die "No lock file provided.  Unable to continue";
         return 0;
     }
     my $lockfile = $self->{configs}->{lockfile};
@@ -618,10 +619,10 @@ sub set_lockFile() {
     if ( -e $lf ) {
         if ( $self->{configs}->{forceremovelockfile} ) {
             $logger->info("Removing lock file $lf because forceremovelockfile is set to 1 (true)");
-            unlink $lf or $logger->logdie("Unable to remove lock file $lf: $!");
+            unlink $lf or $logger->fatal("Unable to remove lock file $lf: $!") and return 0;
         }
         else {
-            open my $fh, '<', $lf or ( $logger->logdie("Unable to open lock file $lf: $!") and return 0 );
+            open my $fh, '<', $lf or ( $logger->fatal("Unable to open lock file $lf: $!") and return 0 );
             my @contents = <$fh>;
             close $fh;
             chomp(@contents);
@@ -631,7 +632,7 @@ sub set_lockFile() {
         } ## end else [ if ( $self->{configs}->...)]
     } ## end if ( -e $lf )
 
-    -e $lf && $logger->logdie("Lock file $lf still exists.  Manually remove lock file. Exiting");
+    -e $lf && $logger->fatal("Lock file $lf still exists.  Manually remove lock file. Exiting") && return 0;
 
     # Create lock file (running pid file) or die
     $self->{lockmgr} = LockFile::Simple->make( -max => 1, -delay => 1, -hold => 0 );
@@ -639,7 +640,7 @@ sub set_lockFile() {
     # $self->{lockmgr}->configure(  -delay => 1, -hold => 0, -max => 1  );
     $logger->debug( "Dumping lockmgr: " . Dumper( $self->{lockmgr} ) ) if ( $logger->is_debug() );
     $self->{lock} = $self->{lockmgr}->lock( 'lockhandle', $lf )
-      || ( $logger->logdie("Can't create lock file at $lf .\n") and return 0 );
+      || ( $logger->fatal("Can't create lock file at $lf .\n") and return 0 );
     $lock_obj = $self->{lock};
 
     $logger->info("Lock file created at $lf");
@@ -662,7 +663,7 @@ sub logger_thread() {
         my $logobj = $logstoreview->{$logtoreview};
         $logobj->{chain} = $logtoreview;    # Set the chain name to object value
                                             #  This is used in the create_iptables_commands() sub
-        my $thr = threads->create( \&review_log, $self, $logobj ) or $logger->logdie("Unable to create thread");
+        my $thr = threads->create( \&review_log, $self, $logobj ) or $logger->fatal("Unable to create thread");
         push( @$LoggerTIDS, $thr->tid() );
         $logger->debug( "Thread created for $logtoreview: " . $thr->tid() )                  if ( $logger->is_debug() );
         $logger->debug( "Thread id >>" . $thr->tid() . "<< state is " . $thr->is_running() ) if ( $logger->is_debug() );
@@ -1089,10 +1090,10 @@ sub check_if_rule_exists {
 sub add_global_chain() {
     my ($self) = @_;
 
-    my $chain = $self->{configs}->{chainprefix} || $logger->logdie("No chain prefix set");
+    my $chain = $self->{configs}->{chainprefix} || $logger->fatal("No chain prefix set");
     $chain = $chain . "global";
 
-    my $globalchains_str = $self->{configs}->{globalchains} || $logger->logdie("No global chains set");
+    my $globalchains_str = $self->{configs}->{globalchains} || $logger->fatal("No global chains set");
     my @globalchains     = split( /,/, $globalchains_str );
 
     $logger->info("Adding global chain $chain");
