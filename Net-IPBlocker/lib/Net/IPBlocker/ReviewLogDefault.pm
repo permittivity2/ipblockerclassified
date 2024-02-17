@@ -95,6 +95,7 @@ sub grep_regexps {
     return $matches if ( !@log_contents );
 
     # DO NOT SORT NUMERICALLY!  The info in the configs states the order is sorted alphabetically
+    my $epoch = time();
     foreach my $regex ( sort keys %{ $log->{regexpdeny} } ) {
         my $pattern = $log->{regexpdeny}{$regex};
         $logger->debug("$TID|Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
@@ -108,9 +109,12 @@ sub grep_regexps {
 
             foreach my $ip_address ( $line =~ /$REGEX_IPV4/g, $line =~ /$REGEX_IPV6/g ) {
                 # $matches->{$ip_address};
-                $matches->{$ip_address}->{count}++;
-                $matches->{$ip_address}->{logline} = $line;
-                $logger->debug("$TID|Found IP address: $ip_address in log line: $line");
+                if ( !exists $tracker->{jailed}->{$ip_address} ) {
+                    $tracker->{jailed}->{$ip_address} = $epoch;
+                    $matches->{$ip_address}->{count}++;
+                    $matches->{$ip_address}->{logline} = $line;
+                    $logger->debug("$TID|Found IP address: $ip_address in log line: $line");
+                }
             }
         } ## end foreach my $line (@current_matches)
     } ## end foreach my $regex ( sort keys...)
@@ -126,7 +130,7 @@ sub grep_regexps {
 
 # Description:  A sub ran after the IPs have been enqueue'd for blocking
 #               By default, this sub will track the IPs that have been enqueued and then after 30 minutes will delete the rule from iptables
-#               Actually, it passes a delete rule to the iptablesqueue_enqueue sub
+#               Actually, this sub passes a delete rule to the iptablesqueue_enqueue sub
 # Assumes:      $logobj has set $logobj->{enqueued} to rules that have been enqueued
 # Requires:     $self, $logobj
 sub post_enqueue {
@@ -140,14 +144,7 @@ sub post_enqueue {
     $logger->debug("$TID|Dumper of self: " . Dumper($self)) if $logger->is_debug();
 
     my $epoch = time();
-    foreach ( @{ $logobj->{enqueued_rules} } ) {
-        my $rule = $_->{rule};
-        push @{$tracker->{jailed}->{$epoch}}, $rule;
-    }
-
-    $logger->debug("$TID|Dumper of tracker: " . Dumper($tracker));
-
-    foreach my $jailedtime ( keys %{$tracker->{jailedtime}} ) {
+    foreach my $jailedtime ( keys %{$tracker->{jailed}} ) {
         $logger->debug("$TID|Checking jailedtime: $jailedtime");
         if ( $jailedtime + $jailtime < $epoch ) {
             foreach my $rule ( @{$tracker->{jailed}->{$jailedtime}} ) {

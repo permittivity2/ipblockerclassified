@@ -392,6 +392,7 @@ sub new() {
 
     # Setup logging.
     $logger = $log;  #From Log::Any
+    $logger->context->{TID} = "Thread:main:tid:" . threads->tid;
     $logger->info("Logging initialized and ready to go");
     $logger->debug( "Dumping self: " . Dumper($self) ) if ( $logger->is_debug() ); 
 
@@ -447,8 +448,7 @@ However, that is very unlikely because the timing of processing will vary and it
 sub go() {
     my ($self) = @_;
     my $start_time = time();
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
+    # local $logger->context->{TID} = "Thread:main:tid:" . threads->tid; 
 
     # If there are no log files to review, then there is nothing to do
     unless ( $self->{configs}->{logs_to_review} ) {
@@ -474,20 +474,20 @@ sub go() {
     $self->add_global_allow_deny_ips();
 
     # Create a thread for each logger watcher
-    $logger->logdie("$TID|Unable to review logs") unless ( $self->logger_thread() );
+    $logger->logdie("Unable to review logs") unless ( $self->logger_thread() );
 
     my $totalruntime = $self->{configs}->{totalruntime};
     my $timeleft     = $totalruntime;
     while ($timeleft > 0 ) {
         $timeleft--;
         sleep 1;
-        my $logmsg = "$TID|Runtime remaining: $timeleft second(s).  ";
+        my $logmsg = "Runtime remaining: $timeleft second(s).  ";
         $logmsg .= sprintf("Elapsed time: %0.3f second(s)", (time() - $start_time) );
-        $logger->debug($logmsg);
+        $logger->info($logmsg);
         my $queuestate = $IptablesQueue->pending();
         my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
         if ( !defined $iptablesQueue_pending ) {
-            my $logmsg = "$TID|IptablesQueue is in an undefined state. This is probably intentional. ";
+            my $logmsg = "IptablesQueue is in an undefined state. This is probably intentional. ";
             $logmsg .= "Exiting.";
             $logger->info($logmsg);
             last;
@@ -496,13 +496,13 @@ sub go() {
 
     my $runtime = time() - $start_time;
     $runtime = sprintf( "%.4f", $runtime );
-    $logger->info("$TID|Module runtime: $runtime second(s)");
-    $logger->info("$TID|Trying to run a graceful stop....");
+    $logger->info("Module runtime: $runtime second(s)");
+    $logger->info("Trying to run a graceful stop....");
     my $args = {
         chains_created => $tracker->{chains_created},
     };
     $self->stop( $args ) && return 1;
-    $logger->error("$TID|Unable to complete a graceful stop.  Exiting the hard way.");
+    $logger->error("Unable to complete a graceful stop.  Exiting the hard way.");
     return 0;
 } ## end sub go
 
@@ -511,52 +511,53 @@ sub go() {
 # Requires:     $self
 sub iptables_thread() {
     my ($self) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
+    local $logger->context->{TID} = "Thread:queuewatcher:tid:" . threads->tid;
+
+    $SIG{'KILL'} = sub { threads->exit(); };   # This needs to be much better.  A future enhancement
 
     my $cyclesleep = $self->{configs}->{queuechecktime};
     my $cycles     = $self->{configs}->{queuecycles};
     my $cyclesleft = $cycles;
-    my $logmsg     = "$TID|Starting iptables queue watching thread with $cycles cycles and $cyclesleep seconds";
+    my $logmsg     = "Starting iptables queue watching thread with $cycles cycles and $cyclesleep seconds";
     $logmsg .= " between cycles";
     $logger->info($logmsg);
 
     while (1) {
         my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
         if ( !defined $iptablesQueue_pending ) {
-            my $logmsg = "$TID|IptablesQueue is in an undefined state. This is probably intentional. ";
+            my $logmsg = "IptablesQueue is in an undefined state. This is probably intentional. ";
             $logmsg .= "Exiting the IP Tables Thread.";
             $logger->info($logmsg);
             last;
         } ## end if ( !defined $iptablesQueue_pending)
 
         if ( $iptablesQueue_pending > 0 ) {
-            $logger->info("$TID|Queue length of IptablesQueue is $iptablesQueue_pending");
+            $logger->info("Queue length of IptablesQueue is $iptablesQueue_pending");
             my $data = $IptablesQueue->dequeue();
-            $logger->debug( "$TID|Dequeued from IptablesQueue: " . Dumper($data) ) if $logger->is_debug();
+            $logger->debug( "Dequeued from IptablesQueue: " . Dumper($data) ) if $logger->is_debug();
             my $now = time();
             $self->run_iptables($data) || $logger->error( "Not successful running iptables command: " . Dumper($data) );
             $IPTABLESRUNLINE = __LINE__;               # See commentary way above about this variable
             $IPTABLESRUNLINE = $IPTABLESRUNLINE - 1;
             my $elapsed = time() - $now;
             $elapsed = sprintf( "%.4f", $elapsed );
-            $logger->debug("$TID|Iptables command took $elapsed second(s) to run");
+            $logger->debug("Iptables command took $elapsed second(s) to run");
         } ## end if ( $iptablesQueue_pending...)
         elsif ( $iptablesQueue_pending == 0 ) {
             # This is a bit of extra logging but if we are at this point, speed is not an issue
-            my $logmsg = "$TID|IptablesQueue depth is 0 so sleeping for $cyclesleep second";
+            my $logmsg = "IptablesQueue depth is 0 so sleeping for $cyclesleep second";
             $logmsg .= "s" if ( $cyclesleep != 1 );
             $logmsg .= ".";
             $logger->info($logmsg);
             usleep $cyclesleep * 1000000;
             $cyclesleft--;
             if ( $cyclesleft <= 0 ) {
-                $logger->info("$TID|IptablesQueue thread has completed $cycles cycle(s). Setting queue to end.");
+                $logger->info("IptablesQueue thread has completed $cycles cycle(s). Setting queue to end.");
                 $IptablesQueue->end();
             } ## end if ( $cyclesleft <= 0)            
         } ## end elsif ( $iptablesQueue_pending...)
         else {
-            $logger->error("$TID|IptablesQueue queue is in an unknown state. Exiting due to an unknown issue.");
+            $logger->error("IptablesQueue queue is in an unknown state. Exiting due to an unknown issue.");
             last;
         }
     } ## end while (1)
@@ -650,6 +651,7 @@ sub set_lockFile() {
 # Returns:     1 or dies if thread can not be created
 sub logger_thread() {
     my $self = shift;
+    # local $logger->context->{TID} = "Thread:main:tid:" . threads->tid;
 
     my $logstoreview = $self->{configs}->{logs_to_review};
     $logstoreview ||= {};
@@ -676,8 +678,6 @@ sub logger_thread() {
 # Returns:      @directions
 sub prepare_directions() {
     my ( $self, $logobj ) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
 
     my @directions = $logobj->{directions} ? split( /\W+/, $logobj->{directions} ) : ();
     @directions = map  { lc($_) } @directions;
@@ -687,31 +687,6 @@ sub prepare_directions() {
     return @directions;
 } ## end sub prepare_directions
 
-# sub get_grepmodule {
-#     my ($self, $logobj) = @_;
-#     my $TID = "TID: " . threads->tid;
-#     lib->import($logobj->{libpath}) if ( $logobj->{libpath} );
-#     my $grepmodule = $logobj->{grepmodule} || 'Net::IPBlocker::GrepRegexpsDefault';
-
-#     $logger->debug("$TID|Trying to require $grepmodule");
-#     if ( $grepmodule =~ m/::/ ) {
-#         eval "require $grepmodule";
-#     } else {
-#         eval require $grepmodule;
-#     }
-#     # eval require $grepmodule; # This works for both module names and paths
-
-#     if ($@) {
-#         $logger->error("$TID|Unable to require $grepmodule: $@");
-#         return 0;
-#     } else {
-#         $logger->info("$TID|Successfully required $grepmodule");
-#     }
-
-#     return $grepmodule;
-# }
-
-
 # Description:  Gets the log review module or sets to the default
 #               The log review module is the module that actually reads the log file and determisn what to do with IPs
 #               It can do other things as well.  The LogReviewDefault module is the default module.
@@ -720,27 +695,27 @@ sub prepare_directions() {
 # Returns:      $module
 sub get_reviewlog_module {
     my ($self, $logobj) = @_;
-    my $TID = "TID: " . threads->tid;
+
     if ( $logobj->{libpath} ) {
-        $logger->debug("$TID|Importing libpath: $logobj->{libpath}");
+        $logger->debug("Importing libpath: $logobj->{libpath}");
         lib->import($logobj->{libpath});
     }
     my $module = $logobj->{module} || 'Net::IPBlocker::ReviewLogDefault';
 
-    $logger->debug("$TID|Trying to require $module");
+    $logger->debug("Trying to require $module");
     if ( $module =~ m/::/ ) {
-        $logger->debug("$TID|Module has :: in it.  Trying to require $module");
+        $logger->debug("Module has :: in it.  Trying to require $module");
         eval "require $module";
     } else {
-        $logger->debug("$TID|Module does not have :: in it.  Trying to require $module");
+        $logger->debug("Module does not have :: in it.  Trying to require $module");
         eval require $module;
     }
 
     if ($@) {
-        $logger->error("$TID|Unable to require $module: $@");
+        $logger->error("Unable to require $module: $@");
         return 0;
     }
-    $logger->info("$TID|Successfully required $module");
+    $logger->info("Successfully required $module");
 
     if ( $module->can('new') ) {
         my $newargs = {
@@ -749,9 +724,9 @@ sub get_reviewlog_module {
             iptablesqueue_enqueue => \&iptablesqueue_enqueue,
         };
         $module = $module->new($newargs);
-        $logger->debug("$TID|Module >>$module<< has a sub called new.");
+        $logger->debug("Module >>$module<< has a sub called new.");
     } else {
-        $logger->error("$TID|Module >>$module<< does not have a new sub.  This is not required but is encouraged.");
+        $logger->error("Module >>$module<< does not have a new sub.  This is not required but is encouraged.");
     }
 
     return $module
@@ -768,8 +743,10 @@ sub get_reviewlog_module {
 # Returns:      1 (usually) but could return 0 if something goes wrong
 sub review_log() {
     my ( $self, $logobj ) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
+    local $logger->context->{TID} = "Thread:$logobj->{chain}:tid:" . threads->tid;
+
+    $SIG{'KILL'} = sub { threads->exit(); };   # This needs to be much better.  A future enhancement
+
     my $start_time = time();
 
     # Get the right sub for reviewing the log
@@ -799,7 +776,7 @@ sub review_log() {
 
     while ( $cyclesleft > 0 ) {
         my $start_loop_time = time();
-        $logger->info("$TID|$cyclesleft cycles remaining for $logobj->{file}.");
+        $logger->info("$cyclesleft cycles remaining for $logobj->{file}.");
         $logobj = $self->readlogfile($logobj);
         $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj) || {};
 
@@ -833,7 +810,7 @@ sub review_log() {
             $self->iptablesqueue_enqueue($args) || $eject++ && last;
         } ## end foreach my $rule (@rules)
 
-        my $logmsg = "$TID|Exiting while loop for $chain. iptablesqueue_enqueue() returned falsy";
+        my $logmsg = "Exiting while loop for $chain. iptablesqueue_enqueue() returned falsy";
         $eject && $logger->info($logmsg) && last;
         $self->iptablesqueue_enqueue( { check_pending => 1 } ) || last;
 
@@ -841,17 +818,17 @@ sub review_log() {
 
         # my $timediff = time() - $start_loop_time;
         my $timediff = sprintf( "%.4f", time() - $start_loop_time );
-        $logger->info("$TID| Review of $chain took $timediff seconds");
+        $logger->info("Review of $chain took $timediff seconds");
 
         last unless --$cyclesleft;    # Break out of loop if $cyclesleft is 0
-        $logger->debug("$TID|Sleeping for $cyclesleep seconds");
+        $logger->debug("Sleeping for $cyclesleep seconds");
         usleep($microcyclesleep);
     } ## end while ( $cyclesleft > 0 )
 
     my $runtime = time() - $start_time;
     $runtime = sprintf( "%.4f", $runtime );
     my $cycles_completed = $logobj->{cycles} - $cyclesleft;
-    my $logmsg           = "$TID|Finished reviewing $logobj->{file}.  Cycles completed: $cycles_completed";
+    my $logmsg           = "Finished reviewing $logobj->{file}.  Cycles completed: $cycles_completed";
     $logmsg .= "  out of $cycles requested. Total run time: $runtime seconds";
     $logger->info($logmsg);
     return 1;
@@ -915,106 +892,6 @@ sub load_configs {
     return $self->{configs};
 } ## end sub load_configs
 
-# Special helper function for clean_ips_to_block()
-
-# Description:  A helper function for clean_ips_to_block_allowdeny()
-# Returns:      A hash reference of IPs
-# sub reverseMapHash() {
-#     my $self = shift;
-#     my $hash = shift;
-#     my $new_hash = {};
-#     foreach my $key ( sort keys %{$hash} ) {
-#         $new_hash->{ $hash->{$key} }++;
-#     }
-#     return $new_hash;
-# } ## end sub reverseMapHash
-
-# Description: Returns the logobj with ips_to_block set with the IPs to block from the allow/deny lists
-#   There is a lot of logging available in this sub.
-#   This sub is called from review_log()
-# sub clean_ips_to_block_allowdeny() {
-#     my $self   = shift;
-#     my $logobj = shift;
-#     my $TID    = threads->tid;
-#     $TID = "TID: " . $TID;
-
-#     local $Data::Dumper::Terse  = 1;    # Disable use of $VARn
-#     local $Data::Dumper::Indent = 0;    # Disable indentation
-
-#     # $logger->debug("Reviewing log object: " . Dumper($logobj)) if ( $logger->is_debug() );
-
-#     my $allowdeny        = $logobj->{allowdeny}          ||= $self->{configs}->{allowdeny} ||= "";
-#     my $logobj_allowlist = $logobj->{allowlist}          ||= $self->{configs}->{allowlist} ||= {};
-#     my $logobj_denylist  = $logobj->{denylist}           ||= $self->{configs}->{denylist}  ||= {};
-#     my $global_denylist  = $self->{configs}->{denylist}  ||= {};
-#     my $global_allowlist = $self->{configs}->{allowlist} ||= {};
-
-#     my $ips_to_block = $logobj->{ips_to_block} ||= {};
-
-#     # Due to the configs module, need to reverse map the allowlists and denylists
-#     $logobj_allowlist = $self->reverseMapHash($logobj_allowlist);
-#     $logobj_denylist  = $self->reverseMapHash($logobj_denylist);
-#     $global_allowlist = $self->reverseMapHash($global_allowlist);
-#     $global_denylist  = $self->reverseMapHash($global_denylist);
-
-#     # Some logging info:
-#     $logger->info("$TID|Allow/Deny: $allowdeny");
-#     $logger->debug( "$TID|Logobj allowlist: " . Dumper($logobj_allowlist) ) if ( $logger->is_debug() );
-#     $logger->debug( "$TID|Logobj denylist: " . Dumper($logobj_denylist) )   if ( $logger->is_debug() );
-#     $logger->debug( "$TID|Logobj ips_to_block: " . Dumper($ips_to_block) )  if ( $logger->is_debug() );
-#     $logger->debug( "$TID|Global allowlist: " . Dumper($global_allowlist) ) if ( $logger->is_debug() );
-#     $logger->debug( "$TID|Global denylist: " . Dumper($global_denylist) )   if ( $logger->is_debug() );
-
-#     # Combine global and logobj allowlist and denylist
-#     my $allowlist = { %{$global_allowlist}, %{$logobj_allowlist} };
-#     my $denylist  = { %{$global_denylist},  %{$logobj_denylist} };
-
-#     # More logging info:
-#     $logger->debug( "$TID|Combined allowlist: " . Dumper($allowlist) ) if ( $logger->is_debug() );
-#     $logger->debug( "$TID|Combined denylist: " . Dumper($denylist) )   if ( $logger->is_debug() );
-
-#     # Combine denylist with ips_to_block
-#     $denylist = { %{$denylist}, %{$ips_to_block} };
-
-#     # More logging info:
-#     $logger->debug( "$TID|Combined denylist with ips_to_block: " . Dumper($denylist) ) if ( $logger->is_debug() );
-
-#     # This is the meat of the function....
-#     ## If we Deny first then then no need to remove IPs from the denylist
-#     if ( $allowdeny eq 'Deny,Allow' ) {
-#         $logobj->{ips_to_block} = $denylist;
-#         $logger->debug( "$TID|Returning logobj with ips_to_block of: " . Dumper( $logobj->{ips_to_block} ) )
-#           if ( $logger->is_debug() );
-#         return $logobj;
-#     } ## end if ( $allowdeny eq 'Deny,Allow')
-#     ## If we Allow first then we need to remove IPs from the denylist
-#     ## The map below removes allowlist from denylist
-#     ## The || (or) is used to prevent undef errors
-#     map { delete $denylist->{$_} || $_ } keys %{$allowlist};
-#     $logobj->{ips_to_block} = $denylist;
-#     $logger->debug( "$TID|Returning logobj with ips_to_block of: " . Dumper( $logobj->{ips_to_block} ) )
-#       if ( $logger->is_debug() );
-#     return $logobj;
-# } ## end sub clean_ips_to_block_allowdeny
-
-# Runs whatever parameters are passed to it against iptables
-#  This is intended to be a one stop shop for running iptables out from a queue.
-#  However, there are a few instances where it is called directly... especially when creating chains
-#   This hopefully prevents excessive wait/locking on iptables
-#   and helps to keep commands running in the order they are received.
-# Arguments must be passed as a hash reference with (so far) the following keys:
-#   rule:  The rule to run
-#   options:  Any options to pass to iptables
-#  Where it is ran like this:
-#   iptables $options $rule 2>&1
-# Future enhancement:
-#   1. delete existing rule if it exists
-# Take note this sub is intended (but not required) to be called from sub iptables_thread()
-#  An error will happen if not called from sub iptables_thread(), but it will not stop the program
-#  This is to encourage using the iptablesqueue_enqueue() sub instead of run_iptables() directly
-#  So, to say this more clearly, if you want to run iptables commands, then call iptablesqueue_enqueue()
-
-
 # Description:  Runs iptables commands.  This is intended to be a one stop shop for running iptables out from a queue.
 #               However, there are a few instances where it is called directly... especially when creating chains
 #               This hopefully prevents excessive wait/locking on iptables and helps to keep commands running in the
@@ -1039,8 +916,6 @@ sub run_iptables() {
           . "Maybe you meant to call \$self->iptablesqueue_enqueue(\$args) instead of \$self->run_iptables(\$args)";
         $logger->error($logmsg);
     } ## end if ( $caller_lst[2] !=...)
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
 
     # Preliminary checks
     exists $args->{rule}                || $logger->error("No rule passed to run_iptables()") && return 0;
@@ -1052,7 +927,7 @@ sub run_iptables() {
 
     if ( $logger->is_debug() ) {
         $logger->debug(
-            "$TID|Running run_iptables iptables command of: $iptables and with arguments: " . Dumper($args) );
+            "Running run_iptables iptables command of: $iptables and with arguments: " . Dumper($args) );
     }
 
     # Future enhancement:  If deleteexisting is set to 1, then delete the existing rule
@@ -1064,10 +939,10 @@ sub run_iptables() {
     my $allowdupes = $args->{allowdupes};
 
     if ( $allowdupes == 0 ) {
-        $logger->debug("$TID|Checking if rule exists before adding: $options $rule");
+        $logger->debug("Checking if rule exists before adding: $options $rule");
         my $retval = $self->check_if_rule_exists($args);
         if ( $retval =~ /in tracker/ ) {
-            my $logmsg = "$TID|Return value: $retval.  Rule is in the tracker.  Not adding rule: ";
+            my $logmsg = "Return value: $retval.  Rule is in the tracker.  Not adding rule: ";
             $logmsg .= "$iptables $options $rule";
             $logger->debug($logmsg);
             # The rule should already be in the tracker but we increment it for the heck of it
@@ -1077,34 +952,37 @@ sub run_iptables() {
         if ( $retval eq "rule exists" ) {
             # Since the rule exists and we are not allowing dupes, then we do not need to add the rule and
             # we return success
-            $logger->debug("$TID|Rule exists.  Not adding rule: $iptables $options $rule");
+            $logger->debug("Rule exists.  Not adding rule: $iptables $options $rule");
             # But we do track it so that we can remove it on exit AND so that we can check if it exists later
             $tracker->{iptables_rules}->{$rule}++;
             return 1;
         } ## end if ( $retval eq "rule exists")
         elsif ( $retval eq "DNE" ) {
-            $logger->debug("$TID|Rule does not exist.  Adding rule: $iptables $options $rule");
+            $logger->debug("Rule does not exist.  Adding rule: $iptables $options $rule");
         }
         elsif (( $retval eq "create chain" ) && ( $options =~ m/-N/ ) )
         {
             # Creating chains is a special case.  We just allow it to happen.
-            $logger->debug("$TID|Trying to create chain: $iptables $options $rule");
+            $logger->debug("Trying to create chain: $iptables $options $rule");
 
             # We track the chains created so that we can remove them on exit
             $tracker->{chains_created}->{$rule}++;
         } ## end elsif ( ( $retval eq "create chain"...))
         elsif ( $retval eq "chain does not exist" ) {
-            $logger->error("$TID|Chain does not exist for the rule.  Not creating rule: $iptables $options $rule");
+            $logger->error("Chain does not exist for the rule.  Not creating rule: $iptables $options $rule");
             return 0;
         }
         elsif ( $retval eq "permission denied" ) {
-            my $logmsg = "$TID|Permission denied (not root or sudo with user not set?).  ";
+            my $logmsg = "Permission denied (not root or sudo with user not set?).  ";
             $logmsg .= "Can't check if rule exists: $iptables $options $rule";
             $logger->error($logmsg);
             return 0;
         } ## end elsif ( $retval eq "permission denied")
+        elsif ( $retval eq "delete rule" ) {
+            $logger->debug("Rule is to delete a rule.  No need to check if it exists; error will happen if it does exist");
+        }
         else {
-            $logger->error( "$TID|Unknown return from check_if_rule_exists(): " . $retval );
+            $logger->error( "Unknown return from check_if_rule_exists(): " . $retval );
             return 0;
         }
     } ## end if ( $allowdupes == 0 )
@@ -1112,18 +990,18 @@ sub run_iptables() {
     my $command = "$iptables $options $rule 2>&1";
     $tracker->{iptables_rules}->{$rule}++;
     if ( $self->{configs}->{PRODMODE} ) {
-        $logger->debug("$TID|Running $command");
+        $logger->debug("Running $command");
         my $output = `$command`;
-        $logger->debug("$TID|Output of iptables command: $output");
+        $logger->debug("Output of iptables command: $output");
         return 1;
     } ## end if ( $self->{configs}->...)
     else {
-        $logger->info("$TID|In test mode.  Would run: $command");
+        $logger->info("In test mode.  Would run: $command");
         return 1;
     }
 
     # Should not get here but by default return 0
-    $logger->error("$TID|Should not get here but by default returning 0");
+    $logger->error("Should not get here but by default returning 0");
     return 0;
 } ## end sub run_iptables
 
@@ -1145,29 +1023,32 @@ sub set_iptables_command() {
 # Returns:      Multiple scalar strings returns with specific meanings.  See code for details
 sub check_if_rule_exists {
     my ( $self, $args ) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
 
     # Preliminary checks
-    $args->{rule}                or return $self->error("$TID|No rule passed to check_if_rule_exists");
-    $self->{configs}->{iptables} or $logger->error("$TID|No iptables command set, this may cause problems");
+    $args->{rule}                or return $self->error("No rule passed to check_if_rule_exists");
+    $self->{configs}->{iptables} or $logger->error("No iptables command set, this may cause problems");
 
     my $iptables = $self->{configs}->{iptables};
     my $rule     = $args->{rule};
     my $options  = $args->{options} // "";
 
     if ( $tracker->{chains_created}->{$rule} ) {
-        $logger->debug("$TID|Chain $rule has already been ran. Returning >>chain in tracker<<");
+        $logger->debug("Chain $rule has already been ran. Returning >>chain in tracker<<");
         return "chain in tracker";
     }
 
-    if ( $tracker->{iptables_rules}->{$rule} ) {
-        $logger->debug("$TID|Rule $rule has already been ran. Returning >>rule in tracker<<");
+    if ( $options =~ /-A/ && $tracker->{iptables_rules}->{$rule} ) {
+        $logger->debug("Rule $rule has already been added. Returning >>rule in tracker<<");
         return "rule in tracker";
     }
 
+    if ( $options =~ /-D/ ) {
+        $logger->debug("Rule is to delete a rule.  No need to check if it exists; error will happen if it does exist");
+        return "delete rule";
+    }
+
     if ( $options =~ /-N/ ) {
-        my $logmsg = "$TID|Rule is to create a chain.  No need to check if it exists; error will happen if it does ";
+        my $logmsg = "Rule is to create a chain.  No need to check if it exists; error will happen if it does ";
         $logmsg .= "exist and probably does not matter";
         $logger->debug($logmsg);
         return "create chain";
@@ -1175,29 +1056,29 @@ sub check_if_rule_exists {
 
     my $checkrule_result = `$iptables -w -C $rule 2>&1`;
     if ( $? == 0 ) {
-        $logger->debug("$TID|Rule appears to already exist. Returning >>rule exists<<");
+        $logger->debug("Rule appears to already exist. Returning >>rule exists<<");
         return "rule exists";
     }
 
     if ( $checkrule_result =~ /iptables: Bad rule.*does a matching rule exist in that chain.*/ ) {
-        $logger->debug("$TID|Rule appears to not exist. Returning >>DNE<<");
-        $logger->debug("$TID|Output of iptables: $checkrule_result");
+        $logger->debug("Rule appears to not exist. Returning >>DNE<<");
+        $logger->debug("Output of iptables: $checkrule_result");
         return "DNE";
     }
 
     if ( $checkrule_result =~ /iptables.*Chain.*does not exist*/ ) {
-        $logger->debug("$TID|Chain does not appear to exist. Returning: >>chain does not exist<<");
-        $logger->debug("$TID|Output of iptables: $checkrule_result");
+        $logger->debug("Chain does not appear to exist. Returning: >>chain does not exist<<");
+        $logger->debug("Output of iptables: $checkrule_result");
         return "chain does not exist";
     }
 
     if ( $checkrule_result =~ /iptables.*Permission denied.*you must be root/ ) {
-        $logger->debug("$TID|You do not have permmission to run iptables.  You must be root.");
-        $logger->debug("$TID|Output of iptables: $checkrule_result");
+        $logger->debug("You do not have permmission to run iptables.  You must be root.");
+        $logger->debug("Output of iptables: $checkrule_result");
         return "permission denied";
     }
 
-    $self->error("$TID|Should not get here but by default returning 0. Output of iptables: $checkrule_result");
+    $self->error("Should not get here but by default returning 0. Output of iptables: $checkrule_result");
 } ## end sub check_if_rule_exists
 
 # Description:  Creates the global chain and then adds jump rule(s) to the global chain.
@@ -1207,23 +1088,21 @@ sub check_if_rule_exists {
 # Returns:      1 if able to enqueue commands otherwise 0
 sub add_global_chain() {
     my ($self) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
 
-    my $chain = $self->{configs}->{chainprefix} || $logger->logdie("$TID|No chain prefix set");
+    my $chain = $self->{configs}->{chainprefix} || $logger->logdie("No chain prefix set");
     $chain = $chain . "global";
 
-    my $globalchains_str = $self->{configs}->{globalchains} || $logger->logdie("$TID|No global chains set");
+    my $globalchains_str = $self->{configs}->{globalchains} || $logger->logdie("No global chains set");
     my @globalchains     = split( /,/, $globalchains_str );
 
-    $logger->info("$TID|Adding global chain $chain");
+    $logger->info("Adding global chain $chain");
     my $args = {
         options => "-w -N",
         rule    => "$chain",
     };
     $self->iptablesqueue_enqueue($args) || return 0;
 
-    $logger->info("$TID|Adding global chain $chain to @globalchains tables");
+    $logger->info("Adding global chain $chain to @globalchains tables");
     for my $table (@globalchains) {
         my $args = {
             options => "-A",
@@ -1240,18 +1119,16 @@ sub add_global_chain() {
 # Returns 0 if queue is not allowing enqueuing
 sub iptablesqueue_enqueue() {
     my ( $self, $args ) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
 
     my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
     if ( !defined $iptablesQueue_pending ) {
-        my $logmsg = "$TID|IptablesQueue is in an undefined state. This is probably intentional. ";
+        my $logmsg = "IptablesQueue is in an undefined state. This is probably intentional. ";
         $logmsg .= "Returning 0";
         $logger->info($logmsg);
         return 0;
     } ## end if ( !defined $iptablesQueue_pending)
     return 1 if ( $args->{check_pending} );
-    $logger->debug( "$TID|Enqueuing onto the iptables queue: " . Dumper($args) ) if ( $logger->is_debug() );
+    $logger->debug( "Enqueuing onto the iptables queue: " . Dumper($args) ) if ( $logger->is_debug() );
     $IptablesQueue->enqueue($args);
     return 1;
 } ## end sub iptablesqueue_enqueue
@@ -1267,8 +1144,6 @@ sub iptablesqueue_enqueue() {
 # Returns:      $logobj with the logcontents set
 sub readlogfile {
     my ( $self, $logobj ) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
 
     # Check file is readable
     my $file = $logobj->{file} //= "/dev/null";    # Default to /dev/null if file is not set
@@ -1280,14 +1155,14 @@ sub readlogfile {
     $logobj->{readentirefile} //= $self->{configs}->{readentirefile} //= 0;
     $logobj->{seek} = 0 if ( $logobj->{readentirefile} );
 
-    $logger->debug("$TID|Reading $file at byte position $logobj->{seek}");
+    $logger->debug("Reading $file at byte position $logobj->{seek}");
 
     # Open and close the file handle as quickly as possible.
     # This has two major flaws:
     #   1.  If the file is rotated while open then someting bad may happen, maybe.
     #   2.  If the file is larger than we can handle in "memory", then something bad may happen, maybe.
     open my $fh, '<', $file or do {
-        $logger->error("$TID|Can't open $file: $!");
+        $logger->error("Can't open $file: $!");
         return $logobj;
     };
     seek( $fh, $logobj->{seek}, 0 );
@@ -1299,15 +1174,15 @@ sub readlogfile {
         $logger->debug( "There are " . scalar(@logcontents) . " lines from $file to review" );
     }
     else {
-        $logger->info("$TID|No new lines appear to be in $file");
+        $logger->info("No new lines appear to be in $file");
         $logobj->{logcontents} = ();
     }
 
     chomp(@logcontents);
     $logobj->{logcontents} = \@logcontents;    #  Might be better to clone?  Hmmm, maybe not.
 
-    $logger->debug( "$TID|The $file file has been read into memory.  " . scalar(@logcontents) . " lines read." );
-    $logger->trace( "$TID|The $file contents: " . Dumper( $logobj->{logcontents} ) ) if ( $logger->is_trace() );
+    $logger->debug( "The $file file has been read into memory.  " . scalar(@logcontents) . " lines read." );
+    $logger->trace( "The $file contents: " . Dumper( $logobj->{logcontents} ) ) if ( $logger->is_trace() );
 
     return $logobj;
 } ## end sub readlogfile
@@ -1358,9 +1233,8 @@ sub readlogfile {
 # Returns:      1 if able to enqueue commands otherwise 0
 sub add_chain() {
     my ( $self, $chain ) = @_;
-    my $TID = "TID: " . threads->tid;
 
-    $logger->debug("$TID|Trying to add chain $chain");
+    $logger->debug("Trying to add chain $chain");
     my $rule    = "$chain";
     my $options = "-w -N";
     my $args    = { rule => $rule, options => $options };
@@ -1380,10 +1254,9 @@ sub add_chain() {
 # Returns:      1 if able to enqueue commands otherwise 0
 sub add_allowdeny_ips() {
     my ( $self, $args ) = @_;
-    my $TID = "TID: " . threads->tid;
 
     if ( ref $args ne 'HASH' ) {
-        $logger->error("$TID|add_alldeny_ips() requires a hash reference as an argument");
+        $logger->error("add_alldeny_ips() requires a hash reference as an argument");
         return 0;
     }
     my $chain = $args->{chain} ||= "ipblocker_global";
@@ -1398,21 +1271,21 @@ sub add_allowdeny_ips() {
         @allowdenyorder = qw / deny allow /;
     }
 
-    $logger->debug( "$TID|IP rules: " . Dumper( \%ip_rules ) ) if $logger->is_debug();
+    $logger->debug( "IP rules: " . Dumper( \%ip_rules ) ) if $logger->is_debug();
 
     # foreach my $action (keys %ip_rules) {
     foreach my $action (@allowdenyorder) {
-        $logger->debug("$TID|Adding $action rules to chain $chain");
+        $logger->debug("Adding $action rules to chain $chain");
 
         # my $chain = $args->{chain} . $action;
         my $chain       = $args->{chain};
         my $rule_action = $action eq 'allow' ? 'ACCEPT' : 'DROP';
         foreach my $ip ( sort @{ $ip_rules{$action} } ) {
-            $logger->debug("$TID|Adding $action rule for IP $ip to chain $chain");
+            $logger->debug("Adding $action rule for IP $ip to chain $chain");
             foreach my $direction ( '-s', '-d' ) {
                 my $rule = "$chain $direction $ip -j $rule_action";
                 my $args = { rule => $rule, options => "-w -A" };
-                $logger->debug("$TID|Adding >>-w -A $rule<< to iptables queue");
+                $logger->debug("Adding >>-w -A $rule<< to iptables queue");
                 $self->iptablesqueue_enqueue($args) || return 0;
             } ## end foreach my $direction ( '-s'...)
         } ## end foreach my $ip ( sort @{ $ip_rules...})
@@ -1428,9 +1301,8 @@ sub add_allowdeny_ips() {
 # Returns:      Returns the value returned by add_allowdeny_ips()
 sub add_global_allow_deny_ips() {
     my ($self) = @_;
-    my $TID = "TID: " . threads->tid;
 
-    $logger->debug("$TID|Adding global allow/deny IPs to global chains");
+    $logger->debug("Adding global allow/deny IPs to global chains");
     my $chain     = $self->{configs}->{chainprefix} . "global";
     my @allowlist = ( map { $self->{configs}->{allowlist}->{$_} } sort keys %{ $self->{configs}->{allowlist} } );
     my @denylist  = ( map { $self->{configs}->{denylist}->{$_} } sort keys %{ $self->{configs}->{denylist} } );
@@ -1443,7 +1315,7 @@ sub add_global_allow_deny_ips() {
         allowdeny => $allowdeny
     };
 
-    $logger->debug( "$TID|Args to add_allowdeny_ips(): " . Dumper($args) ) if $logger->is_debug();
+    $logger->debug( "Args to add_allowdeny_ips(): " . Dumper($args) ) if $logger->is_debug();
 
     return $self->add_allowdeny_ips($args);
 } ## end sub add_global_allow_deny_ips
@@ -1454,9 +1326,8 @@ sub add_global_allow_deny_ips() {
 # Returns:      Returns the value returned by add_allowdeny_ips()
 sub add_logger_allow_deny_ips() {
     my ( $self, $logobj ) = @_;
-    my $TID = "TID: " . threads->tid;
 
-    $logger->debug("$TID|Adding logger allow/deny IPs to logger chain $logobj");
+    $logger->debug("Adding logger allow/deny IPs to logger chain $logobj");
     my $chain     = $self->{configs}->{chainprefix} . $logobj->{chain};
     my @allowlist = ( map { $logobj->{allowlist}->{$_} } sort keys %{ $logobj->{allowlist} } );
     my @denylist  = ( map { $logobj->{denylist}->{$_} } sort keys %{ $logobj->{denylist} } );
@@ -1469,7 +1340,7 @@ sub add_logger_allow_deny_ips() {
         allowdeny => $allowdeny
     };
 
-    $logger->debug( "$TID|Args to add_allowdeny_ips(): " . Dumper($args) ) if $logger->is_debug();
+    $logger->debug( "Args to add_allowdeny_ips(): " . Dumper($args) ) if $logger->is_debug();
 
     return $self->add_allowdeny_ips($args);
 
@@ -1485,13 +1356,11 @@ sub add_logger_allow_deny_ips() {
 # Returns:      1 if successful, otherwise 0
 sub stop() {
     my ( $self, $args ) = @_;
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
     $logger->info("Setting IptablesQueue to end");
 
     my $chains_created = $args->{chains_created} ||= $tracker->{chains_created} ||= {};
     my $iptables_rules = $args->{iptables_rules} ||= $tracker->{iptables_rules} ||= {};
-    # $logger->debug( "$TID|Dump of tracker: " . Dumper($tracker) ) if $logger->is_debug();
+    # $logger->debug( "Dump of tracker: " . Dumper($tracker) ) if $logger->is_debug();
 
     # Removing chains that were created (or tried to be created)
     my @chains_to_remove = ();
@@ -1500,11 +1369,11 @@ sub stop() {
         push @chains_to_remove, $chain;
     }
     push @chains_to_remove, $self->{configs}->{chainprefix} . "global";
-   $logger->info("$TID|chains_to_remove: " . Dumper(\@chains_to_remove)) if $logger->is_debug(); 
+   $logger->info("chains_to_remove: " . Dumper(\@chains_to_remove)) if $logger->is_debug(); 
     if ( $self->{chains_created} || $chains_created ) {
-        $logger->info("$TID|Removing chains that were created (or tried to be created)");
+        $logger->info("Removing chains that were created (or tried to be created)");
         foreach my $chain ( sort keys %{ $self->{chains_created} } ) {
-            $logger->info("$TID|Removing chain $chain");
+            $logger->info("Removing chain $chain");
             $IptablesQueue->enqueue(
                 {
                     options => qq/-w -X/,
@@ -1514,17 +1383,17 @@ sub stop() {
         } ## end foreach my $chain ( sort keys...)
     } ## end if ( $self->{chains_created...})
     else {
-        $logger->info("$TID|No list of chains to remove.  Maybe kill 3 was issued instead of a polite stop");
+        $logger->info("No list of chains to remove.  Maybe kill 3 was issued instead of a polite stop");
     }
 
-    $logger->info("$TID|Clearing queues (error will be logged if there is an issue)");
+    $logger->info("Clearing queues (error will be logged if there is an issue)");
     clear_queues() || $logger->error("Unable to clear queues");
-    $logger->info("$TID|Waiting for threads to finish (join) (error will be logged if there is an issue)");
+    $logger->info("Waiting for threads to finish (join) (error will be logged if there is an issue)");
     join_threads() || $logger->error("Unable to join threads");
 
-    $logger->info("$TID|Releasing lock");
+    $logger->info("Releasing lock");
     $lock_obj->release;
-    $logger->info("$TID|Bye bye");
+    $logger->info("Bye bye");
 
     return 1;
 } ## end sub stop
@@ -1546,9 +1415,7 @@ sub stop() {
 #               This may be an issue if trying to read a file across NFS or SSHFS and there is a network issue.
 # Returns:      1 if successful.
 sub join_threads() {
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
-    $logger->debug("$TID|Waiting for threads to finish (join)");
+    $logger->debug("Waiting for threads to finish (join)");
     $_->join() for threads->list();
     return 1;
 } ## end sub join_threads
@@ -1556,9 +1423,7 @@ sub join_threads() {
 # Description:  Clears the queues
 # Returns:      1 if successful, otherwise 0
 sub clear_queues() {
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
-    $logger->debug("$TID|Clearing queues");
+    $logger->debug("Clearing queues");
     $IptablesQueue->end();
     my $counter = 6;
     while ( $IptablesQueue->pending() && $counter-- ) {
@@ -1566,12 +1431,12 @@ sub clear_queues() {
         sleep 1;
     }
     if ( $IptablesQueue->pending() ) {
-        $logger->error("$TID|Data still in queue.  This may be an issue.");
-        $logger->error("$TID|Data still in queue: " . Dumper( $IptablesQueue) );
+        $logger->error("Data still in queue.  This may be an issue.");
+        $logger->error("Data still in queue: " . Dumper( $IptablesQueue) );
         return 0;
     }
     else {
-        $logger->debug("$TID|No queued items in IptablesQueue");
+        $logger->debug("No queued items in IptablesQueue");
         return 1;
     }
 } ## end sub clear_queues
@@ -1580,9 +1445,7 @@ sub clear_queues() {
 # Description:  Reloads the module
 #               This is not yet implemented
 sub reload() {
-    my $TID = threads->tid;
-    $TID = "TID: " . $TID;
-    $logger->info("$TID|Reloading not yet implemented.  Do a CTRL-C (SIG_INT) and restart the module");
+    $logger->info("Reloading not yet implemented.  Do a CTRL-C (SIG_INT) and restart the module");
 
     # Need to figure out how to bless(re-bless) the $self object so that configs are reloaded into $self->{configs}
 
@@ -2135,9 +1998,6 @@ Jeff Gardner, C<< <jeffreygiraffe at cpan.org> >>
 Please report any bugs or feature requests to C<bug-net-ipblocker at rt.cpan.org>, or through
 the web interface at L<https://rt.cpan.org/NoAuth/ReportBug.html?Queue=Net-IPBlocker>.  I will be notified, and then you'll
 automatically be notified of progress on your bug as I make changes.
-
-
-
 
 =head1 SUPPORT
 
