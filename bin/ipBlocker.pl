@@ -1,6 +1,10 @@
 #!/usr/bin/perl -w
 #vim: noai:ts=4:sw=4
 
+# On Ubuntu, you can install the following packages:
+# sudo apt install libdatetime-perl libconfig-file-perl liblog-any-adapter-callback-perl libregexp-ipv6-perl \
+# liblockfile-simple-perl liblog-log4perl-perl libgetopt-argparse-perl liblog-any-adapter-log4perl-perl
+
 use strict;
 use warnings;
 use lib '/home/gardner/git/ipblockerclassified/Net-IPBlocker/lib/';
