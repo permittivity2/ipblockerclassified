@@ -75,6 +75,7 @@ my $DEFAULTS = {
     logcontents          => {},
     # loglevel             => 'INFO',
     logs_to_review       => {},
+    minlogentrytime      => 0,                                   # This is the minimum time of the log entry to process
     prodmode             => 0,
     queuechecktime       => 1,
     queuecycles          => LONG_MAX,
@@ -478,12 +479,16 @@ sub go() {
 
     my $totalruntime = $self->{configs}->{totalruntime};
     my $timeleft     = $totalruntime;
+    my $minlogentrytime = $self->{configs}->{minlogentrytime};
     while ($timeleft > 0 ) {
         $timeleft--;
+        $minlogentrytime--;
         sleep 1;
-        my $logmsg = "Runtime remaining: $timeleft second(s).  ";
-        $logmsg .= sprintf("Elapsed time: %0.3f second(s)", (time() - $start_time) );
-        $logger->info($logmsg);
+        if ( !$minlogentrytime ) {
+            my $logmsg = "Maximum runtime remaining: $timeleft second(s).  ";
+            $logmsg .= sprintf("Elapsed time: %0.3f second(s)", (time() - $start_time) );
+            $logger->info($logmsg);
+        }
         my $queuestate = $IptablesQueue->pending();
         my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
         if ( !defined $iptablesQueue_pending ) {

@@ -56,6 +56,7 @@ sub main {
         queuecycles         => $clargs->queuecycles,
         readentirefile      => $clargs->readentirefile,
         totalruntime        => $clargs->totalruntime,
+        minlogentrytime     => $clargs->minlogentrytime,
     };
 
     my $ipb    = Net::IPBlocker->new($ipbArgs);
@@ -133,7 +134,7 @@ sub setup_logger {
 # Setup command line options
 # This is often a lengthy subroutine so making it last is a probably good idea for readability
 # The "add_arg" adds to a list so the order of the options for display is reverse order listed here.
-# Meaning, if you want the help to display in a certain order, list them in reverse order here.
+# Meaning, if you want the help for an option to display in a certain order, list them in reverse order here.
 sub setupArgParse {
     my $args = shift;
 
@@ -191,6 +192,13 @@ sub setupArgParse {
         dest    => 'prodmode',
         default => 0,
         help    => 'The production mode to use.  0 = test mode, 1 = production mode',
+    );
+
+    $ap->add_arg(
+        '--minlogentrytime',
+        type    => 'Scalar',
+        dest    => 'minlogentrytime',
+        help    => 'The minimum time between intervals of sending an INFO message to the log.',
     );
 
     $ap->add_arg(
