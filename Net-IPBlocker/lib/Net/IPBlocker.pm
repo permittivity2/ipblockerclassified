@@ -743,7 +743,7 @@ sub get_reviewlog_module {
 #               This is called as a thread and runs a loop to check the log file for new entries
 #               Prior to checking the log file, it creates a chain for the log file and adds it to the global chain
 # Future:       This entire sub needs to be refactored.
-#               It's easy to folllow but it is:
+#               It's easy to follow but it is:
 #                 a) just too many lines for one sub
 #                 b) way too heavily nested!
 # Requires:     $self, $logobj

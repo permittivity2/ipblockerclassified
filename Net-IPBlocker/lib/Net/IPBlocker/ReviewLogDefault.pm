@@ -55,15 +55,14 @@ This sub is called after the module is successfully loaded as a sanity check.
 sub new() {
     my $class = shift;
     my $args  = shift;
-    my $TID = "TID: " . threads->tid;
     my $self = {
         parentobjself => $args->{parentobjself},
         logobj        => $args->{logobj},
         configs       => $args->{parentobjself}->{configs},
     };
 
-    $logger->info("$TID|In new in " . __PACKAGE__ . " module");
-    $logger->debug("$TID|Dumper of self: " . Dumper($self)) if $logger->is_debug();
+    $logger->info("In new in " . __PACKAGE__ . " module");
+    $logger->debug("Dumper of self: " . Dumper($self)) if $logger->is_debug();
 
     # Set the enqueue alias
     *iptablesqueue_enqueue = $args->{iptablesqueue_enqueue};
@@ -86,8 +85,7 @@ Returns an array of default regular expressions for IP blocking.
 # Returns:      Hash reference of IP addresses with count of how many times the IP address was found
 sub grep_regexps {
     my ( $self, $log ) = @_;
-    my $TID = "TID: " . threads->tid;
-    $logger->debug("$TID|In grep_regexps in " . __PACKAGE__ . " module.");
+    $logger->debug("In grep_regexps in " . __PACKAGE__ . " module.");
 
     my $matches      = {};
     my @log_contents = @{ $log->{logcontents} };
@@ -98,14 +96,14 @@ sub grep_regexps {
     my $epoch = time();
     foreach my $regex ( sort keys %{ $log->{regexpdeny} } ) {
         my $pattern = $log->{regexpdeny}{$regex};
-        $logger->debug("$TID|Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
+        $logger->debug("Grep'ing for >>$pattern<< in $log->{file} from byte position $log->{seek}");
 
         my @current_matches = grep { /$pattern/ } @log_contents;
-        $logger->debug( "$TID|Dumper of current matches: " . Dumper(@current_matches) ) if $logger->is_debug();
+        $logger->debug( "Dumper of current matches: " . Dumper(@current_matches) ) if $logger->is_debug();
 
         foreach my $line (@current_matches) {
             chomp($line);
-            $logger->debug("$TID|Checking >>$line<< for IP address");
+            $logger->debug("Checking >>$line<< for IP address");
 
             foreach my $ip_address ( $line =~ /$REGEX_IPV4/g, $line =~ /$REGEX_IPV6/g ) {
                 # $matches->{$ip_address};
@@ -113,15 +111,15 @@ sub grep_regexps {
                     $tracker->{jailed}->{$ip_address} = $epoch;
                     $matches->{$ip_address}->{count}++;
                     $matches->{$ip_address}->{logline} = $line;
-                    $logger->debug("$TID|Found IP address: $ip_address in log line: $line");
+                    $logger->debug("Found IP address: $ip_address in log line: $line");
                 }
             }
         } ## end foreach my $line (@current_matches)
     } ## end foreach my $regex ( sort keys...)
 
-    $logger->debug( "$TID|Dump of IP matches after all regex comparisons: " . Dumper($matches) ) if $logger->is_debug();
+    $logger->debug( "Dump of IP matches after all regex comparisons: " . Dumper($matches) ) if $logger->is_debug();
 
-    my $log_msg = "$TID|Matched IP addresses to be reviewed for potential blocking: ";
+    my $log_msg = "Matched IP addresses to be sent back for potential blocking: ";
     $log_msg .= join( ",", keys %{$matches} );
     $logger->info($log_msg);
 
@@ -135,25 +133,24 @@ sub grep_regexps {
 # Requires:     $self, $logobj
 sub post_enqueue {
     my ( $self, $logobj ) = @_;
-    my $TID = "TID: " . threads->tid;
     my $jailtime = $logobj->{jailtime} || $self->{configs}->{jailtime} || 1800;
-    $logger->debug("$TID|In post_enqueue in " . __PACKAGE__ . " module.");
+    $logger->debug("In post_enqueue in " . __PACKAGE__ . " module.");
 
-    $logger->debug("$TID|Dumper of logobj: " . Dumper($logobj)) if $logger->is_debug();
+    $logger->debug("Dumper of logobj: " . Dumper($logobj)) if $logger->is_debug();
 
-    $logger->debug("$TID|Dumper of self: " . Dumper($self)) if $logger->is_debug();
+    $logger->debug("Dumper of self: " . Dumper($self)) if $logger->is_debug();
 
     my $epoch = time();
     foreach my $jailedtime ( keys %{$tracker->{jailed}} ) {
-        $logger->debug("$TID|Checking jailedtime: $jailedtime");
+        $logger->debug("Checking jailedtime: $jailedtime");
         if ( $jailedtime + $jailtime < $epoch ) {
             foreach my $rule ( @{$tracker->{jailed}->{$jailedtime}} ) {
                 my $args = { options => "-w -D", rule => $rule }; 
                 $self->iptablesqueue_enqueue($args);
-                $logger->info("$TID|Deleted rule from iptables: $rule");
+                $logger->info("Enqueuing this delete rule: $rule");
             }
             delete $tracker->{jailed}->{jailedtime};
-            $logger->info("$TID|Deleted jailedtime $jailedtime from tracker");
+            $logger->info("Deleted jailedtime $jailedtime from tracker");
         }
     
     }
