@@ -56,10 +56,8 @@ my $DEFAULTS = {
     allowdeny            => 'Allow,Deny',
     allowlist            => {},
     configsfile          => '/etc/ipblocker/ipblocker.conf',
-    # cycles               => LONG_MAX,  # How long to run.  This is irrespective of any other cycle or queue cycle.
-    #                                    # Nice for testing or maybe you want to run this for a certain amount of time and 
-    #                                    # and restart it out of cron or something.
-    # cyclesleep           => 0.5,
+    cycles               => LONG_MAX,   # How many times to check a log file.  LONG_MAX is the default.
+    cyclesleep           => 0.5,        # How many seconds to sleep between checking a log file.
     dumpconfigsandexit   => 0,
     denylist             => {},
     forceremovelockfile  => 0,
@@ -75,7 +73,8 @@ my $DEFAULTS = {
     logcontents          => {},
     # loglevel             => 'INFO',
     logs_to_review       => {},
-    minlogentrytime      => 1,                                   # This is the minimum time of the log entry to process
+    minlogentrytime      => 300,                                # This is the minimum time to put something in the logs to let you know
+                                                                #  the module is still running.  This is in seconds.
     prodmode             => 0,
     queuechecktime       => 1,
     queuecycles          => LONG_MAX,
@@ -333,7 +332,8 @@ When the queue is empty, how long to wait before checking again.  When the queue
 
 queuecycles       => LONG_MAX,
 
-How many times to check the queue.  LONG_MAX is the default.  Why not infinity?  Because I don't want to.
+How many times to check the queue.  LONG_MAX is the default.  Why not infinity?  Because I don't want to.  
+None of my relationships lasted forever and I don't think you running this module should be indefinite. 
 
 =head4 readentirefile
 
@@ -449,6 +449,7 @@ However, that is very unlikely because the timing of processing will vary and it
 sub go() {
     my ($self) = @_;
     my $start_time = time();
+    $self->{configs}->{start_time} = $start_time;
     # local $logger->context->{TID} = "Thread:main:tid:" . threads->tid; 
 
     # If there are no log files to review, then there is nothing to do
@@ -477,28 +478,7 @@ sub go() {
     # Create a thread for each logger watcher
     $logger->fatal("Unable to review logs") and die "Unable to review logs" unless ( $self->logger_thread() );
 
-    my $totalruntime = $self->{configs}->{totalruntime};
-    my $timeleft     = $totalruntime;
-    my $minlogentrytime = $self->{configs}->{minlogentrytime};
-    while ($timeleft > 0 ) {
-        $timeleft--;
-        $minlogentrytime--;
-        sleep 1;
-        if ( !$minlogentrytime ) {
-            my $logmsg = "Maximum runtime remaining: $timeleft second(s).  ";
-            $logmsg .= sprintf("Elapsed time: %0.3f second(s)", (time() - $start_time) );
-            $logger->info($logmsg);
-            $minlogentrytime = $self->{configs}->{minlogentrytime};
-        }
-        my $queuestate = $IptablesQueue->pending();
-        my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
-        if ( !defined $iptablesQueue_pending ) {
-            my $logmsg = "IptablesQueue is in an undefined state. This is probably intentional. ";
-            $logmsg .= "Exiting.";
-            $logger->info($logmsg);
-            last;
-        } ## end if ( !defined $iptablesQueue_pending)
-    } ## end while ($cycles)
+    $self->_go_while();
 
     my $runtime = time() - $start_time;
     $runtime = sprintf( "%.4f", $runtime );
@@ -512,6 +492,43 @@ sub go() {
     return 0;
 } ## end sub go
 
+# Description:  Just a sub for go() to continually check the queue and provide a small amount of logging
+# Requires:     $self
+# Returns:      1 when the queue is "end"ed or "totalruntime" is has reached 0.
+
+sub _go_while {
+    my $self = shift;
+    my $start_time = $self->{configs}->{start_time};
+    my $totalruntime = $self->{configs}->{totalruntime};
+    my $timeleft     = $totalruntime;
+    my $minlogentrytime = $self->{configs}->{minlogentrytime};
+    while ( $timeleft ) {
+        $timeleft--;
+        $minlogentrytime--;
+        sleep 1;
+        my $queuestate = $IptablesQueue->pending();
+        my $iptablesQueue_pending = eval { $IptablesQueue->pending() };
+        if ( !defined $iptablesQueue_pending ) {
+            my $logmsg = "IptablesQueue is in an undefined state. This is probably intentional. ";
+            $logmsg .= "Exiting.";
+            $logger->info($logmsg);
+            return 1;
+        } ## end if ( !defined $iptablesQueue_pending)
+        if ( !$minlogentrytime ) {
+            $minlogentrytime = $self->{configs}->{minlogentrytime};
+            my $logmsg = "Maximum runtime remaining: $timeleft second(s).  ";
+            $logmsg .= sprintf("Elapsed time: %0.3f second(s) out of %d second(s).  ", 
+                        (time() - $start_time), $totalruntime 
+                    );
+            $logmsg .= "Queue length: " . $IptablesQueue->pending() . ".  ";
+            $logmsg .= "Next entry in $minlogentrytime second(s).  ";
+            $logger->info($logmsg);
+        }        
+    } ## end while ($cycles)    
+
+    return 1;
+}
+
 # Description:  Manages an iptables queue in a continuous loop, handling queue items, logging status, and pausing 
 #               based on configuration settings.
 # Requires:     $self
@@ -519,7 +536,10 @@ sub iptables_thread() {
     my ($self) = @_;
     local $logger->context->{TID} = "Thread:queuewatcher:tid:" . threads->tid;
 
-    $SIG{'KILL'} = sub { threads->exit(); };   # This needs to be much better.  A future enhancement
+    $SIG{'KILL'} = sub { 
+            $logger->info("IptablesQueue thread is being killed.  Exiting the thread.");
+            threads->exit(); 
+        };   # This needs to be much better.  A future enhancement
 
     my $cyclesleep = $self->{configs}->{queuechecktime};
     my $cycles     = $self->{configs}->{queuecycles};
@@ -538,7 +558,7 @@ sub iptables_thread() {
         } ## end if ( !defined $iptablesQueue_pending)
 
         if ( $iptablesQueue_pending > 0 ) {
-            $logger->info("Queue length of IptablesQueue is $iptablesQueue_pending");
+            $logger->debug("Queue length of IptablesQueue is $iptablesQueue_pending");
             my $data = $IptablesQueue->dequeue();
             $logger->debug( "Dequeued from IptablesQueue: " . Dumper($data) ) if $logger->is_debug();
             my $now = time();
@@ -551,10 +571,12 @@ sub iptables_thread() {
         } ## end if ( $iptablesQueue_pending...)
         elsif ( $iptablesQueue_pending == 0 ) {
             # This is a bit of extra logging but if we are at this point, speed is not an issue
-            my $logmsg = "IptablesQueue depth is 0 so sleeping for $cyclesleep second";
-            $logmsg .= "s" if ( $cyclesleep != 1 );
-            $logmsg .= ".";
-            $logger->info($logmsg);
+            if ( $logger->is_debug() ) {
+                my $logmsg = "IptablesQueue depth is 0 so sleeping for $cyclesleep second";
+                $logmsg .= "s" if ( $cyclesleep != 1 );
+                $logmsg .= ".";
+                $logger->debug($logmsg);
+            }
             usleep $cyclesleep * 1000000;
             $cyclesleft--;
             if ( $cyclesleft <= 0 ) {
@@ -752,7 +774,10 @@ sub review_log() {
     my ( $self, $logobj ) = @_;
     local $logger->context->{TID} = "Thread:$logobj->{chain}:tid:" . threads->tid;
 
-    $SIG{'KILL'} = sub { threads->exit(); };   # This needs to be much better.  A future enhancement
+    $SIG{'KILL'} = sub { 
+            $logger->info("Review log thread is being killed.  Exiting the thread.");
+            threads->exit(); 
+        };   # This needs to be much better.  A future enhancement
 
     my $start_time = time();
 
@@ -763,9 +788,10 @@ sub review_log() {
     my $chain = $self->{configs}->{chainprefix} . $logobj->{chain};
 
     # set file log values if exist, otherwise set to global values if exist else set to default values
-    my $cycles          = $logobj->{cycles}     ||= LONG_MAX;
+    my $cycles          = $logobj->{cycles}     ||= ( $self->{configs}->{cycles} - 1 );
+    $logger->info("Reviewing $logobj->{file} for $cycles cycles.");
     my $cyclesleft      = $cycles;
-    my $cyclesleep      = $logobj->{cyclesleep} ||= 0.5;
+    my $cyclesleep      = $logobj->{cyclesleep} ||= $self->{configs}->{cyclesleep};
     my $microcyclesleep = $cyclesleep * 1000000;
 
     $self->add_chain($chain);
@@ -783,7 +809,7 @@ sub review_log() {
 
     while ( $cyclesleft > 0 ) {
         my $start_loop_time = time();
-        $logger->info("$cyclesleft cycles remaining for $logobj->{file}.");
+        $logger->debug("$cyclesleft cycles remaining for $logobj->{file}.");
         $logobj = $self->readlogfile($logobj);
         $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj) || {};
 
@@ -825,7 +851,7 @@ sub review_log() {
 
         # my $timediff = time() - $start_loop_time;
         my $timediff = sprintf( "%.4f", time() - $start_loop_time );
-        $logger->info("Review of $chain took $timediff seconds");
+        $logger->debug("Review of $chain took $timediff seconds");
 
         last unless --$cyclesleft;    # Break out of loop if $cyclesleft is 0
         $logger->debug("Sleeping for $cyclesleep seconds");
@@ -952,6 +978,7 @@ sub run_iptables() {
             my $logmsg = "Return value: $retval.  Rule is in the tracker.  Not adding rule: ";
             $logmsg .= "$iptables $options $rule";
             $logger->debug($logmsg);
+            $logger->info("Rule is in tracker.  Not adding rule: $iptables $options $rule");
             # The rule should already be in the tracker but we increment it for the heck of it
             $tracker->{iptables_rules}->{$rule}++;
             return 1;
@@ -959,18 +986,18 @@ sub run_iptables() {
         if ( $retval eq "rule exists" ) {
             # Since the rule exists and we are not allowing dupes, then we do not need to add the rule and
             # we return success
-            $logger->debug("Rule exists.  Not adding rule: $iptables $options $rule");
+            $logger->info("Rule already exists in iptables.  Not adding rule: $iptables $options $rule");
             # But we do track it so that we can remove it on exit AND so that we can check if it exists later
             $tracker->{iptables_rules}->{$rule}++;
             return 1;
         } ## end if ( $retval eq "rule exists")
         elsif ( $retval eq "DNE" ) {
-            $logger->debug("Rule does not exist.  Adding rule: $iptables $options $rule");
+            $logger->info("Adding rule to iptables: $iptables $options $rule");
         }
         elsif (( $retval eq "create chain" ) && ( $options =~ m/-N/ ) )
         {
             # Creating chains is a special case.  We just allow it to happen.
-            $logger->debug("Trying to create chain: $iptables $options $rule");
+            $logger->info("Trying to create chain: $iptables $options $rule");
 
             # We track the chains created so that we can remove them on exit
             $tracker->{chains_created}->{$rule}++;
@@ -987,6 +1014,7 @@ sub run_iptables() {
         } ## end elsif ( $retval eq "permission denied")
         elsif ( $retval eq "delete rule" ) {
             $logger->debug("Rule is to delete a rule.  No need to check if it exists; error will happen if it does exist");
+            $logger->info("Deleting rule: $iptables $options $rule");
         }
         else {
             $logger->error( "Unknown return from check_if_rule_exists(): " . $retval );
@@ -1181,7 +1209,7 @@ sub readlogfile {
         $logger->debug( "There are " . scalar(@logcontents) . " lines from $file to review" );
     }
     else {
-        $logger->info("No new lines appear to be in $file");
+        $logger->debug("No new lines appear to be in $file");
         $logobj->{logcontents} = ();
     }
 

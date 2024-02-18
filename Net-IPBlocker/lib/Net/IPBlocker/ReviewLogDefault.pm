@@ -119,6 +119,11 @@ sub grep_regexps {
 
     $logger->debug( "Dump of IP matches after all regex comparisons: " . Dumper($matches) ) if $logger->is_debug();
 
+    if ( !keys %{$matches} ) {
+        $logger->debug("No IP addresses found in log file: $log->{file}");
+        return $matches;
+    }
+
     my $log_msg = "Matched IP addresses to be sent back for potential blocking: ";
     $log_msg .= join( ",", keys %{$matches} );
     $logger->info($log_msg);
