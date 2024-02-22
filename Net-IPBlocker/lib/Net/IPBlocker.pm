@@ -775,7 +775,7 @@ sub review_log() {
     local $logger->context->{TID} = "Thread:$logobj->{chain}:tid:" . threads->tid;
 
     $SIG{'KILL'} = sub { 
-            $logger->info("Review log thread is being killed.  Exiting the thread.");
+            $logger->info("Review log thread is being killed.  Exiting the thread right now.");
             threads->exit(); 
         };   # This needs to be much better.  A future enhancement
 
