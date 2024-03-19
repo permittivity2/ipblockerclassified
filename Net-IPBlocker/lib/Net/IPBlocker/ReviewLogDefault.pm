@@ -67,6 +67,8 @@ sub new() {
     # Set the enqueue alias
     *iptablesqueue_enqueue = $args->{iptablesqueue_enqueue};
 
+    return 0 if ( ! iptablesqueue_enqueue({ check_pending => 1 }) );  # Check if the iptablesqueue_enqueue sub is available
+
     bless $self, $class;  
     return $self;
 } ## end sub new
@@ -140,22 +142,25 @@ sub post_enqueue {
     my ( $self, $logobj ) = @_;
     my $jailtime = $logobj->{jailtime} || $self->{configs}->{jailtime} || 1800;
     $logger->debug("In post_enqueue in " . __PACKAGE__ . " module.");
-
     $logger->debug("Dumper of logobj: " . Dumper($logobj)) if $logger->is_debug();
-
     $logger->debug("Dumper of self: " . Dumper($self)) if $logger->is_debug();
+    $logger->debug("Dumper of tracker: " . Dumper($tracker)) if $logger->is_debug();
 
     my $epoch = time();
-    foreach my $jailedtime ( keys %{$tracker->{jailed}} ) {
-        $logger->debug("Checking jailedtime: $jailedtime");
-        if ( $jailedtime + $jailtime < $epoch ) {
-            foreach my $rule ( @{$tracker->{jailed}->{$jailedtime}} ) {
-                my $args = { options => "-w -D", rule => $rule }; 
-                $self->iptablesqueue_enqueue($args);
-                $logger->info("Enqueuing this delete rule: $rule");
-            }
-            delete $tracker->{jailed}->{jailedtime};
-            $logger->info("Deleted jailedtime $jailedtime from tracker");
+    foreach my $ip ( keys %{$tracker->{jailed}} ) {
+        my $jailedtime = $tracker->{jailed}->{$ip};
+        my $difference = $epoch - $jailedtime;
+        my $release = ( $difference >= $jailtime ? 1 : 0 ); 
+        $logger->debug("IP $ip was jailed at $jailedtime.  The current time is $epoch.  This makes for a difference of $difference.  The jailtime is $jailtime. " . ( $release ? "This IP will be released." : "This IP will not be released." ) );
+        if ( $release ) {
+            my $chain = $self->parentobjself->{configs}->{chainprefix} . $logobj->{chain};
+            my $rule = "$chain $ip";
+            my $options = "-w -D";
+            my $args = { options => $options, rule => $rule }; 
+            $self->iptablesqueue_enqueue($args) || return 0;
+            $logger->info("Enqueued a rule to delete $ip: $options $rule");
+            delete $tracker->{jailed}->{$ip};
+            $logger->info("Deleted ip $ip from tracker");
         }
     
     }

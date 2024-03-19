@@ -1,0 +1,6 @@
+Revision history for Perl extension Linux::Netfilter::NFTLibmnlAPI.
+
+0.01  Mon Mar 18 21:35:10 2024
+	- original version; created by h2xs 1.23 with options
+		-AX --skip-exporter --use-new-tests -n Linux::Netfilter::NFTLibmnlAPI
+
