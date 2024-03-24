@@ -61,11 +61,11 @@ DIRFILESEP = /
 DFSEP = $(DIRFILESEP)
 NAME = Net::IPBlocker
 NAME_SYM = Net_IPBlocker
-VERSION = 0.01
+VERSION = 0.10
 VERSION_MACRO = VERSION
-VERSION_SYM = 0_01
+VERSION_SYM = 0_10
 DEFINE_VERSION = -D$(VERSION_MACRO)=\"$(VERSION)\"
-XS_VERSION = 0.01
+XS_VERSION = 0.10
 XS_VERSION_MACRO = XS_VERSION
 XS_DEFINE_VERSION = -D$(XS_VERSION_MACRO)=\"$(XS_VERSION)\"
 INST_ARCHLIB = blib/arch
@@ -170,7 +170,6 @@ O_FILES  =
 H_FILES  = 
 MAN1PODS = 
 MAN3PODS = lib/Net/IPBlocker.pm \
-	lib/Net/IPBlocker/NetFilter/Libnftnl.pm \
 	lib/Net/IPBlocker/ReviewLogDefault.pm
 
 # Where is the Config information that we are using/depend on
@@ -196,8 +195,6 @@ PERL_ARCHIVE_AFTER =
 
 TO_INST_PM = lib/Net/IPBlocker.html \
 	lib/Net/IPBlocker.pm \
-	lib/Net/IPBlocker/NetFilter/Libnftnl.pm \
-	lib/Net/IPBlocker/NetFilter/Libnftnl/Wrapper.pm \
 	lib/Net/IPBlocker/ReviewLogDefault.pm \
 	lib/Net/One.pm \
 	lib/Net/pod2htmd.tmp
@@ -270,7 +267,7 @@ RCS_LABEL = rcs -Nv$(VERSION_SYM): -q
 DIST_CP = best
 DIST_DEFAULT = tardist
 DISTNAME = Net-IPBlocker
-DISTVNAME = Net-IPBlocker-0.01
+DISTVNAME = Net-IPBlocker-0.10
 
 
 # --- MakeMaker macro section:
@@ -426,11 +423,9 @@ POD2MAN = $(POD2MAN_EXE)
 
 manifypods : pure_all config  \
 	lib/Net/IPBlocker.pm \
-	lib/Net/IPBlocker/NetFilter/Libnftnl.pm \
 	lib/Net/IPBlocker/ReviewLogDefault.pm
 	$(NOECHO) $(POD2MAN) --section=$(MAN3EXT) --perm_rw=$(PERM_RW) -u \
 	  lib/Net/IPBlocker.pm $(INST_MAN3DIR)/Net::IPBlocker.$(MAN3EXT) \
-	  lib/Net/IPBlocker/NetFilter/Libnftnl.pm $(INST_MAN3DIR)/Net::IPBlocker::NetFilter::Libnftnl.$(MAN3EXT) \
 	  lib/Net/IPBlocker/ReviewLogDefault.pm $(INST_MAN3DIR)/Net::IPBlocker::ReviewLogDefault.$(MAN3EXT) 
 
 
@@ -533,7 +528,7 @@ metafile : create_distdir
 	$(NOECHO) $(ECHO) '  perl: '\''5.006'\''' >> META_new.yml
 	$(NOECHO) $(ECHO) '  strict: '\''0'\''' >> META_new.yml
 	$(NOECHO) $(ECHO) '  warnings: '\''0'\''' >> META_new.yml
-	$(NOECHO) $(ECHO) 'version: '\''0.01'\''' >> META_new.yml
+	$(NOECHO) $(ECHO) 'version: '\''0.10'\''' >> META_new.yml
 	$(NOECHO) $(ECHO) 'x_serialization_backend: '\''CPAN::Meta::YAML version 0.018'\''' >> META_new.yml
 	-$(NOECHO) $(MV) META_new.yml $(DISTVNAME)/META.yml
 	$(NOECHO) $(ECHO) Generating META.json
@@ -594,7 +589,7 @@ metafile : create_distdir
 	$(NOECHO) $(ECHO) '      }' >> META_new.json
 	$(NOECHO) $(ECHO) '   },' >> META_new.json
 	$(NOECHO) $(ECHO) '   "release_status" : "stable",' >> META_new.json
-	$(NOECHO) $(ECHO) '   "version" : "0.01",' >> META_new.json
+	$(NOECHO) $(ECHO) '   "version" : "0.10",' >> META_new.json
 	$(NOECHO) $(ECHO) '   "x_serialization_backend" : "JSON::PP version 4.06"' >> META_new.json
 	$(NOECHO) $(ECHO) '}' >> META_new.json
 	-$(NOECHO) $(MV) META_new.json $(DISTVNAME)/META.json
@@ -880,7 +875,7 @@ testdb_static :: static pure_all
 # --- MakeMaker ppd section:
 # Creates a PPD (Perl Package Description) for a binary distribution.
 ppd :
-	$(NOECHO) $(ECHO) '<SOFTPKG NAME="Net-IPBlocker" VERSION="0.01">' > Net-IPBlocker.ppd
+	$(NOECHO) $(ECHO) '<SOFTPKG NAME="Net-IPBlocker" VERSION="0.10">' > Net-IPBlocker.ppd
 	$(NOECHO) $(ECHO) '    <ABSTRACT>Blocks IPs based on regex from specified log files</ABSTRACT>' >> Net-IPBlocker.ppd
 	$(NOECHO) $(ECHO) '    <AUTHOR>Jeff Gardner &lt;jeffreygiraffe@cpan.org&gt;</AUTHOR>' >> Net-IPBlocker.ppd
 	$(NOECHO) $(ECHO) '    <IMPLEMENTATION>' >> Net-IPBlocker.ppd
@@ -910,8 +905,6 @@ pm_to_blib : $(FIRST_MAKEFILE) $(TO_INST_PM)
 	$(NOECHO) $(ABSPERLRUN) -MExtUtils::Install -e 'pm_to_blib({@ARGV}, '\''$(INST_LIB)/auto'\'', q[$(PM_FILTER)], '\''$(PERM_DIR)'\'')' -- \
 	  'lib/Net/IPBlocker.html' 'blib/lib/Net/IPBlocker.html' \
 	  'lib/Net/IPBlocker.pm' 'blib/lib/Net/IPBlocker.pm' \
-	  'lib/Net/IPBlocker/NetFilter/Libnftnl.pm' 'blib/lib/Net/IPBlocker/NetFilter/Libnftnl.pm' \
-	  'lib/Net/IPBlocker/NetFilter/Libnftnl/Wrapper.pm' 'blib/lib/Net/IPBlocker/NetFilter/Libnftnl/Wrapper.pm' \
 	  'lib/Net/IPBlocker/ReviewLogDefault.pm' 'blib/lib/Net/IPBlocker/ReviewLogDefault.pm' \
 	  'lib/Net/One.pm' 'blib/lib/Net/One.pm' \
 	  'lib/Net/pod2htmd.tmp' 'blib/lib/Net/pod2htmd.tmp' 

@@ -43,7 +43,8 @@ my $lock_obj;    # This is the lock object and is set in set_lockFile()
                  # Needs to be global because it is used in the signal interupts and those use prototyped subs.
 ## Regex for IPv4 and IPv6 capturing.
 #   This is critical and needs be consistent across the entire module
-# my $REGEX_IPV4 = q/.*\b((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))\b.*/;
+#   Do not use "Regexp::IPv4 qw($IPv4_re);"  --- it does not work (or at least I couldn't get it to work) for grabbing
+#   IPv4's in strings
 my $REGEX_IPV4 = q/\b((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))\b/;
 my $REGEX_IPV6      = q/\b($IPv6_re)\b/;
 my $IPTABLESRUNLINE = 0;    #This is just an odd one.  It is used to track the line number of the sub iptables_thread()
@@ -52,6 +53,8 @@ my $IPTABLESRUNLINE = 0;    #This is just an odd one.  It is used to track the l
                             #  This is set in the iptables_thread() sub.
 our $tracker = {};          # Mostly chains added and rules added are stuffed in here for tracking purposes
                             # There has got to be a better way but for now it is just a global hash reference.
+
+# Default configs.  Almost all of these can be set in a config file.
 my $DEFAULTS = {
     allowdeny            => 'Allow,Deny',
     allowlist            => {},
@@ -90,11 +93,11 @@ Net::IPBlocker - Blocks IPs based on regex from specified log files
 
 =head1 VERSION
 
-Version 0.01
+Version 0.10
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.10';
 
 
 =head1 SYNOPSIS
@@ -134,11 +137,6 @@ from iptables).
 https://metacpan.org/dist/Log-Log4perl/view/lib/Log/Log4perl/Appender/Synchronized.pm
 
 =item * Fix the ability for Log4perl to re-read the "log4perl.conf" which seems to not work right now
-
-=item * Change from using log4perl to Log::Any
-
-I didn't know about Log::Any when I started this.  I am open to changing this to Log::Any but I need to 
-figure out how to do that.
 
 =item * my $interfaces = Net::Ifconfig::Wrapper::Ifconfig('list', '', '', '');
 
@@ -478,6 +476,7 @@ sub go() {
     # Create a thread for each logger watcher
     $logger->fatal("Unable to review logs") and die "Unable to review logs" unless ( $self->logger_thread() );
 
+    # This sub just continually checks the queue and provides a small amount of logging  
     $self->_go_while();
 
     my $runtime = time() - $start_time;
@@ -495,7 +494,6 @@ sub go() {
 # Description:  Just a sub for go() to continually check the queue and provide a small amount of logging
 # Requires:     $self
 # Returns:      1 when the queue is "end"ed or "totalruntime" is has reached 0.
-
 sub _go_while {
     my $self = shift;
     my $start_time = $self->{configs}->{start_time};
@@ -691,12 +689,11 @@ sub logger_thread() {
         my $logobj = $logstoreview->{$logtoreview};
         $logobj->{chain} = $logtoreview;    # Set the chain name to object value
                                             #  This is used in the create_iptables_commands() sub
-        my $thr = threads->create( \&review_log, $self, $logobj ) or $logger->fatal("Unable to create thread");
+        my $args2reviewlog = { self => $self, logobj => $logobj, };
+        my $thr = threads->create( \&review_log, $args2reviewlog ) or $logger->fatal("Unable to create thread");
         push( @$LoggerTIDS, $thr->tid() );
         $logger->debug( "Thread created for $logtoreview: " . $thr->tid() )                  if ( $logger->is_debug() );
         $logger->debug( "Thread id >>" . $thr->tid() . "<< state is " . $thr->is_running() ) if ( $logger->is_debug() );
-
-        # $self->review_log( $logstoreview->{$log} );
     } ## end foreach my $logtoreview ( sort...)
 
     return 1;
@@ -771,13 +768,13 @@ sub get_reviewlog_module {
 # Requires:     $self, $logobj
 # Returns:      1 (usually) but could return 0 if something goes wrong
 sub review_log() {
-    my ( $self, $logobj ) = @_;
+    my $args = @_;
+    my $self = $args->{self};
+    my $logobj = $args->{logobj};
     local $logger->context->{TID} = "Thread:$logobj->{chain}:tid:" . threads->tid;
+    $logger->info("Starting review_log for $logobj->{file}");
 
-    $SIG{'KILL'} = sub { 
-            $logger->info("Review log thread is being killed.  Exiting the thread right now.");
-            threads->exit(); 
-        };   # This needs to be much better.  A future enhancement
+    $SIG{'KILL'} = $self->_handle_kill_signal_for_review_log($self, $args);
 
     my $start_time = time();
 
@@ -807,56 +804,49 @@ sub review_log() {
     my @protocols  = $logobj->{protocols} ? split( /\W+/, $logobj->{protocols} ) : ();
     my $ports      = $logobj->{ports} || '';
 
-    while ( $cyclesleft > 0 ) {
-        my $start_loop_time = time();
-        $logger->debug("$cyclesleft cycles remaining for $logobj->{file}.");
-        $logobj = $self->readlogfile($logobj);
-        $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj) || {};
+    $self->_process_logfile( { 
+        start_time          => $start_time, 
+        logobj              => $logobj, 
+        reviewlogmodule     => $reviewlogmodule, 
+        chain               => $chain, 
+        cyclesleft          => $cyclesleft, 
+        cyclesleep          => $cyclesleep, 
+        microcyclesleep     => $microcyclesleep, 
+        directions          => \@directions, 
+        protocols           => \@protocols, 
+    } );
+    # while ( $cyclesleft > 0 ) {
+    #     my $start_loop_time = time();
+    #     $logger->debug("$cyclesleft cycles remaining for $logobj->{file}.");
+    #     $logobj = $self->readlogfile($logobj);
+    #     $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj) || {};
 
-        my @rules;
-        foreach my $ip ( keys %{ $logobj->{ips_to_block} } ) {
-            foreach my $direction (@directions) {
-                my $direction_switch = $direction eq 'destination' ? '-d' : '-s';
-                $direction_switch = int( rand(2) ) ? '-d' : '-s' if ( $direction eq 'random' );
-                my $base_rule = "$direction_switch $ip";
+    #     my @rules;
+    #     $self->_create_rules( { 
+    #         logobj          => $logobj, 
+    #         reviewlogmodule => $reviewlogmodule, 
+    #         rules           => \@rules, 
+    #         directions      => \@directions, 
+    #         protocols       => \@protocols, 
+    #     } );
 
-                scalar @protocols || push( @rules, "$base_rule -j DROP" ) && next;
-                foreach my $protocol (@protocols) {
-                    my $rule = $base_rule . " -p $protocol";
-                    $rule .= " -m multiport -$direction_switch" . "port $logobj->{ports}" if ( $logobj->{ports} );
-                    push @rules, "$rule -j DROP";
-                } ## end foreach my $protocol (@protocols)
-            } ## end foreach my $direction (@directions)
-        } ## end foreach my $ip ( keys %{ $logobj...})
+    #     my $retval = $self->_enqueue_rules_from_review_log({
+    #         logobj          => $logobj,
+    #         tracker         => $tracker,
+    #     });
 
-        my $eject;
-        foreach my $rule (@rules) {
-            $tracker->{iptables_rules}->{"$chain $rule"} && next;
-            my $args = {
-                options => "-w -A",
-                rule    => "$chain $rule",
-            };
-            $tracker->{iptables_rules}->{"$chain $rule"}++;
-            push @{$logobj->{enqueued_rules}}, $args;
+    #     $retval || $logger->info("_enqueue_rules_from_review_log() returned falsy") && last;
+    #     $self->iptablesqueue_enqueue( { check_pending => 1 } ) || last;
 
-            # Stop processing if iptablesqueue_enqueue() returns falsy
-            $self->iptablesqueue_enqueue($args) || $eject++ && last;
-        } ## end foreach my $rule (@rules)
+    #     $reviewlogmodule->can('post_enqueue') && $reviewlogmodule->post_enqueue($logobj);
 
-        my $logmsg = "Exiting while loop for $chain. iptablesqueue_enqueue() returned falsy";
-        $eject && $logger->info($logmsg) && last;
-        $self->iptablesqueue_enqueue( { check_pending => 1 } ) || last;
+    #     my $timediff = sprintf( "%.4f", time() - $start_loop_time );
+    #     $logger->debug("Review of $chain took $timediff seconds");
 
-        $reviewlogmodule->can('post_enqueue') && $reviewlogmodule->post_enqueue($logobj);
-
-        # my $timediff = time() - $start_loop_time;
-        my $timediff = sprintf( "%.4f", time() - $start_loop_time );
-        $logger->debug("Review of $chain took $timediff seconds");
-
-        last unless --$cyclesleft;    # Break out of loop if $cyclesleft is 0
-        $logger->debug("Sleeping for $cyclesleep seconds");
-        usleep($microcyclesleep);
-    } ## end while ( $cyclesleft > 0 )
+    #     last unless --$cyclesleft;    # Break out of loop if $cyclesleft is 0
+    #     $logger->debug("Sleeping for $cyclesleep seconds");
+    #     usleep($microcyclesleep);
+    # } ## end while ( $cyclesleft > 0 )
 
     my $runtime = time() - $start_time;
     $runtime = sprintf( "%.4f", $runtime );
@@ -867,25 +857,122 @@ sub review_log() {
     return 1;
 } ## end sub review_log 
 
-sub review_log_chatgpt {
-    my ($self, $logobj) = @_;
-    my $TID = "TID: " . threads->tid();
-    my $start_time = time;
 
-    my $reviewlogmodule = $self->_get_review_log_module($logobj) or return 0;
-    $logobj ||= {};
-    $self->_initialize_log_object($logobj, $TID);
+sub _process_logfile() {
+    my ($self, $args) = @_;
+    my $start_time = $args->{start_time};
+    my $logobj = $args->{logobj};
+    my $reviewlogmodule = $args->{reviewlogmodule};
+    my $chain = $args->{chain};
+    my $cyclesleft = $args->{cyclesleft};
+    my $cyclesleep = $args->{cyclesleep};
+    my $microcyclesleep = $args->{microcyclesleep};
+    my @directions = @{$args->{directions}};
+    my @protocols = @{$args->{protocols}};
 
-    my ($cycles, $cyclesleft, $microcyclesleep) = $self->_set_log_cycles($logobj);
+    while ( $cyclesleft > 0 ) {
+        my $start_loop_time = time();
+        $logger->debug("$cyclesleft cycles remaining for $logobj->{file}.");
+        $logobj = $self->readlogfile($logobj);
+        $logobj->{ips_to_block} = $reviewlogmodule->grep_regexps($logobj) || {};
 
-    $self->_setup_iptables_chain($logobj, $TID);
+        my @rules;
+        @rules = $self->_create_rules( { 
+                    logobj          => $logobj, 
+                    reviewlogmodule => $reviewlogmodule, 
+                    rules           => \@rules, 
+                    directions      => \@directions, 
+                    protocols       => \@protocols, 
+                } );
 
-    while ($cyclesleft > 0) {
-        $self->_process_log_cycle($logobj, \$cyclesleft, $microcyclesleep, $TID, $reviewlogmodule);
+$logger->logdie("jeff jeff jeff Rules: " . Dumper(\@rules));
+die;
+exit 0;
+
+        my $retval = $self->_enqueue_rules_from_review_log({
+            logobj          => $logobj,
+            tracker         => $tracker,
+        });
+
+        $retval || $logger->info("_enqueue_rules_from_review_log() returned falsy") && last;
+        $self->iptablesqueue_enqueue( { check_pending => 1 } ) || last;
+
+        $reviewlogmodule->can('post_enqueue') && $reviewlogmodule->post_enqueue($logobj);
+
+        my $timediff = sprintf( "%.4f", time() - $start_loop_time );
+        $logger->debug("Review of $chain took $timediff seconds");
+
+        last unless --$cyclesleft;    # Break out of loop if $cyclesleft is 0
+        $logger->debug("Sleeping for $cyclesleep seconds");
+        usleep($microcyclesleep);
+    } ## end while ( $cyclesleft > 0 )
+
+}
+
+sub _enqueue_rules_from_review_log() {
+    my ($self, $args) = @_;
+    my $logobj = $args->{logobj};
+    my $tracker = $args->{tracker};
+
+    foreach my $rule (@{$logobj->{enqueued_rules}}) {
+        $tracker->{iptables_rules}->{"$rule->{options} $rule->{rule}"} && next;
+        $tracker->{iptables_rules}->{"$rule->{options} $rule->{rule}"}++;
+        $self->iptablesqueue_enqueue($rule) || $logger->info("iptablesqueue_enqueue() returned falsy") && return 0;
     }
 
-    $self->_finalize_log_review($logobj, $start_time, $cycles, $cyclesleft, $TID);
     return 1;
+}
+
+sub _create_rules() {
+    my ( $self, $args ) = @_;
+    my $logobj = $args->{logobj};
+    my $reviewlogmodule = $args->{reviewlogmodule};
+    my @rules = @{$args->{rules}};
+    my @directions = @{$args->{directions}};
+    my @protocols = @{$args->{protocols}};
+
+    foreach my $ip ( keys %{ $logobj->{ips_to_block} } ) {
+        foreach my $direction (@directions) {
+            my $direction_switch = $direction eq 'destination' ? '-d' : '-s';
+            $direction_switch = int( rand(2) ) ? '-d' : '-s' if ( $direction eq 'random' );
+            my $base_rule = "$direction_switch $ip";
+
+            scalar @protocols || push( @rules, "$base_rule -j DROP" ) && next;
+            @rules = $self->_push_protocols( { 
+                base_rule           => $base_rule, 
+                direction_switch    => $direction_switch, 
+                logobj              => $logobj, 
+                protocols           => \@protocols, 
+                rules               => \@rules,
+                } 
+            );
+        } ## end foreach my $direction (@directions)
+    } ## end foreach my $ip ( keys %{ $logobj...})
+    return @rules;
+}
+
+sub _push_protocols() {
+    my ( $self, $args ) = shift;
+    my $base_rule = $args->{base_rule};
+    my $direction_switch = $args->{direction_switch};
+    my $logobj = $args->{logobj};
+    my @protocols = @{$args->{protocols}};
+    my @rules = @{$args->{rules}};
+
+    foreach my $protocol (@protocols) {
+        my $rule = $base_rule . " -p $protocol";
+        $rule .= " -m multiport -$direction_switch" . "port $logobj->{ports}" if ( $logobj->{ports} );
+        push @rules, "$rule -j DROP";
+    } ## end foreach my $protocol (@protocols)
+    return @rules;
+}
+
+sub _handle_kill_signal_for_review_log {
+    my ($self, $args) = @_;
+    $SIG{'KILL'} = sub {
+        $self->{logger}->info("Review log thread is being killed. Exiting the thread right now.");
+        threads->exit();
+    };
 }
 
 # Description:  Reads the log file (if one exists) from $self->{configsfile}

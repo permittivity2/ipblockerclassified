@@ -6,7 +6,7 @@ use strict;
 use warnings;
 use Exporter;
 use Regexp::IPv6     qw($IPv6_re);
-use Log::Any qw($log);  # Allegedly handles lots of different logging modules
+use Log::Any qw($log);
 use threads;
 use Data::Dumper;
 use POSIX qw(LONG_MAX);
@@ -25,7 +25,7 @@ my $tracker = {};
 
 =head1 NAME
 
-Net::IPBlocker::GrepRegexpsDefault - Default regular expressions for IP blocking
+Net::IPBlocker::ReviewLogDefault - Default regular expressions for IP blocking
 
 =head1 SYNOPSIS
 
@@ -38,7 +38,9 @@ Net::IPBlocker::GrepRegexpsDefault - Default regular expressions for IP blocking
 =head1 DESCRIPTION
 
 This module provides a default regular expression sub for IP blocking. 
-These regular expressions can be used with the L<Net::IPBlocker> module to match and block IP addresses.
+These is intended to be used by L<Net::IPBlocker> module to match and block IP addresses.
+This module gets a list of strings (presumably log lines from a file) and then greps against the log contents for 
+matching lines and then gets the IP address on each line based on the regular expressions provided.
 
 =head1 METHODS
 
